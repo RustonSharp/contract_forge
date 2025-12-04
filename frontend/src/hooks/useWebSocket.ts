@@ -30,7 +30,7 @@ export function useWebSocket(url: string) {
 
 // 订阅合同进度更新
 export function useContractProgress(
-  executionId: string,
+  executionId: string | undefined,
   onProgress: (data: any) => void,
   onComplete: (data: any) => void
 ) {
@@ -46,8 +46,9 @@ export function useContractProgress(
     socket.on('progress', onProgress)
     socket.on('completed', onComplete)
     
-    // 清理
+    // 清理 - 取消订阅并移除监听器 (Bug 3 fix)
     return () => {
+      socket.emit('unsubscribe', { execution_id: executionId })
       socket.off('progress', onProgress)
       socket.off('completed', onComplete)
     }

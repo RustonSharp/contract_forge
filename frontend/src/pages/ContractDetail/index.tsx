@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { Card, Descriptions, Tag, Progress, Timeline, Spin } from 'antd'
 import { useContractStore } from '@/store/contractStore'
@@ -12,29 +12,38 @@ export default function ContractDetail() {
   )
   const updateContract = useContractStore((state) => state.updateContract)
   
-  // 订阅实时进度更新
-  useContractProgress(
-    id || '',
-    (data) => {
+  // Memoize callbacks to prevent unnecessary re-renders (Bug 4 fix)
+  const handleProgress = useCallback(
+    (data: any) => {
+      if (!id) return
       // 进度更新
-      updateContract(id!, {
+      updateContract(id, {
         progress: data.progress,
         currentStep: data.message,
       })
     },
-    (data) => {
+    [id, updateContract]
+  )
+
+  const handleComplete = useCallback(
+    (data: any) => {
+      if (!id) return
       // 完成
-      updateContract(id!, {
+      updateContract(id, {
         status: 'completed',
         progress: 100,
         completedTime: new Date().toISOString(),
         riskLevel: data.risk_level,
         reportUrl: data.report_url,
       })
-    }
+    },
+    [id, updateContract]
   )
   
-  if (!contract) {
+  // 订阅实时进度更新 - only if id is defined (Bug 1 fix)
+  useContractProgress(id, handleProgress, handleComplete)
+  
+  if (!id || !contract) {
     return (
       <Card>
         <Spin tip="加载中..." />
