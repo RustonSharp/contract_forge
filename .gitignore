@@ -35,5 +35,5 @@ redis_data/
 
 # 学习笔记（可选）
 notes/
-modules.md
-req.md
+docs/modules.md
+docs/req.md

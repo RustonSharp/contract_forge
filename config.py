@@ -70,7 +70,7 @@ class Config:
     
     # API 服务
     API_HOST: str = os.getenv('API_HOST', '0.0.0.0')
-    API_PORT: int = int(os.getenv('API_PORT', '8000'))
+    API_PORT: int = int(os.getenv('API_PORT', '8001'))  # 默认 8001 端口
     API_DEBUG: bool = os.getenv('API_DEBUG', 'True').lower() == 'true'
     
     # ============================================

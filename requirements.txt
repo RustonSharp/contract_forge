@@ -1,9 +1,22 @@
 # Contract Forge - 项目依赖
 
+# Web 框架
+fastapi==0.115.5
+uvicorn[standard]==0.34.0
+pydantic==2.10.3
+
 # 环境变量管理
 python-dotenv==1.2.1
 
 # 数据库连接
 psycopg2-binary==2.9.11
 redis==7.1.0
+
+# 测试框架
+pytest==8.3.4
+pytest-cov==6.0.0
+pytest-mock==3.14.0
+
+# 测试工具（可选）
+pytest-watch==4.2.0  # 用于 watch 模式
 

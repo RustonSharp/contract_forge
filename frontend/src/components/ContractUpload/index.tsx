@@ -4,6 +4,7 @@ import { UploadOutlined, InboxOutlined } from '@ant-design/icons'
 import { useDropzone } from 'react-dropzone'
 import { contractService } from '@/services/contractService'
 import { useContractStore } from '@/store/contractStore'
+import { useContractTypes } from '@/hooks/useContractTypes'
 import './styles.css'
 
 const { Dragger } = Upload
@@ -13,6 +14,9 @@ export default function ContractUpload() {
   const [contractType, setContractType] = useState<string>()
   const [amount, setAmount] = useState<number>()
   const addContract = useContractStore((state) => state.addContract)
+  
+  // 从后端获取合同类型
+  const { types, loading: typesLoading } = useContractTypes()
   
   const handleUpload = async (file: File) => {
     try {
@@ -56,12 +60,14 @@ export default function ContractUpload() {
             placeholder="选择合同类型"
             value={contractType}
             onChange={setContractType}
-            options={[
-              { value: '销售合同', label: '销售合同' },
-              { value: '采购合同', label: '采购合同' },
-              { value: '服务合同', label: '服务合同' },
-              { value: '租赁合同', label: '租赁合同' },
-            ]}
+            loading={typesLoading}
+            options={types
+              .filter(type => type.is_active) // 只显示启用的类型
+              .map(type => ({
+                value: type.type_code,
+                label: type.type_name,
+              }))
+            }
           />
         </div>
         
