@@ -1,0 +1,24 @@
+.upload-options {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.option-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.option-item label {
+  white-space: nowrap;
+}
+
+.upload-tip {
+  margin-top: 16px;
+  padding: 12px;
+  background: #f0f7ff;
+  border-radius: 4px;
+  color: #1890ff;
+}
+
