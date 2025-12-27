@@ -1,0 +1,217 @@
+{
+  "name": "智能合同自动化处理流程 (Smart Contract Automation)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "process-contract",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "id": "webhook-trigger",
+      "name": "Copilot Trigger",
+      "notes": "接收来自 Copilot 的触发指令\n包含 file_path 或文件流"
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8000/api/v1/run-workflow",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file_path",
+              "value": "={{ $json.body.file_path }}"
+            },
+            {
+              "name": "task_id",
+              "value": "={{ $execution.id }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        500,
+        300
+      ],
+      "id": "call-langgraph",
+      "name": "Call LangGraph Agent",
+      "notes": "调用 Python 后端\n执行：解析 -> 检索 -> 评估\n返回：风险等级与报告"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.risk_level }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "High",
+              "output": 0
+            },
+            {
+              "value2": "Medium",
+              "output": 1
+            },
+            {
+              "value2": "Low",
+              "output": 2
+            }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ],
+      "id": "risk-switch",
+      "name": "Risk Level Switch",
+      "notes": "基于风险等级分流"
+    },
+    {
+      "parameters": {
+        "subject": "【高风险】合同审批需人工介入 - {{ $json.subject }}",
+        "emailBody": "检测到高风险合同。\n\n违规条款：\n{{ $json.conflict_clauses }}\n\n请点击以下链接进行人工审核：\nhttp://internal-approval/{{ $execution.id }}",
+        "toEmail": "legal@company.com"
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        150
+      ],
+      "id": "email-high-risk",
+      "name": "Email Legal Team"
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "url": "http://oa-system/api/auto-approve",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "contract_id",
+              "value": "={{ $json.contract_id }}"
+            },
+            {
+              "name": "status",
+              "value": "approved"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1100,
+        450
+      ],
+      "id": "auto-approve",
+      "name": "Auto Approval API"
+    },
+    {
+      "parameters": {
+        "content": "## 合同审批报告\n**风险等级**: {{ $json.risk_level }}\n**总金额**: {{ $json.price }}\n**合规建议**: \n{{ $json.conflict_clauses[0].suggestion }}"
+      },
+      "type": "n8n-nodes-base.markdown",
+      "typeVersion": 1,
+      "position": [
+        1350,
+        300
+      ],
+      "id": "generate-report",
+      "name": "Format Report",
+      "notes": "生成最终报告Markdown"
+    }
+  ],
+  "connections": {
+    "Copilot Trigger": {
+      "main": [
+        [
+          {
+            "node": "Call LangGraph Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LangGraph Agent": {
+      "main": [
+        [
+          {
+            "node": "Risk Level Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Risk Level Switch": {
+      "main": [
+        [
+          {
+            "node": "Email Legal Team",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Auto Approval API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Auto Approval API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Legal Team": {
+      "main": [
+        [
+          {
+            "node": "Format Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto Approval API": {
+      "main": [
+        [
+          {
+            "node": "Format Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
