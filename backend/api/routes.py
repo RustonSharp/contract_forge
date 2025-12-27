@@ -15,6 +15,8 @@ from .schemas import (
 from ..core.graph import app_graph
 # 3. 导入大语言模型服务
 from ..utils.llm_service import LLMService
+# 4. 导入上下文管理器
+from ..utils.context_manager import context_manager
 
 router = APIRouter(prefix="/api/v1")
 
@@ -22,7 +24,10 @@ UPLOAD_DIR = "./uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # 初始化大语言模型服务
-llm_service = LLMService()
+# 从环境变量读取地域配置，默认为北京
+import os
+region = os.getenv("DASHSCOPE_REGION", "beijing")
+llm_service = LLMService(region=region)
 
 # 任务状态存储（实际应该使用 Redis 或数据库）
 task_states: Dict[str, Dict[str, Any]] = {}
@@ -208,8 +213,21 @@ async def start_audit(file: UploadFile = File(...)):
         # 7. 更新任务状态
         task_states[file_id]["status"] = "completed"
         task_states[file_id]["current_step"] = "completed"
+        task_states[file_id]["risks"] = final_state.get("risks", [])
+        task_states[file_id]["overall_score"] = final_state.get("overall_score", 100)
         
-        # 8. 返回审计结果
+        # 8. 保存上下文并标记完成
+        context_manager.save_context(file_id, {
+            "file_path": temp_file_path,
+            "raw_text": final_state.get("raw_text"),
+            "structured_data": final_state.get("structured_data"),
+            "referenced_laws": final_state.get("referenced_laws", []),
+            "risks": final_state.get("risks", []),
+            "overall_score": final_state.get("overall_score", 100)
+        })
+        context_manager.mark_completed(file_id)
+        
+        # 9. 返回审计结果
         return {
             "status": "success",
             "task_id": file_id,
