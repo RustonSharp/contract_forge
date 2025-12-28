@@ -1,3 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+
+# Env / config
+backend/.env
+backend/.env.*
+*.env
+
+# Data / cache
+uploads/
+chroma_db/
+
+# Node / build
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
+# OS
+.DS_Store
 # ============================================
 # Python 后端相关
 # ============================================

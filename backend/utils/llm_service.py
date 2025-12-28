@@ -42,47 +42,25 @@ class LLMService:
         
         # 根据地域设置 base_url（OpenAI 兼容模式）
         # 参考文档：https://help.aliyun.com/zh/model-studio/developer-reference/error-code
-        if self.region == "singapore":
-            # 国际（新加坡）地域
-            self.base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-        else:
-            # 中国大陆（北京）地域
-            self.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        self.base_url = (
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            if self.region == "singapore"
+            else "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
         
         if not self.api_key:
-            print("⚠️ 警告: DASHSCOPE_API_KEY 或 MODEL_STUDIO_KEY 未设置，LLM 功能可能无法正常工作")
-            print("💡 提示: 请在 backend/.env 文件中设置 DASHSCOPE_API_KEY 或 MODEL_STUDIO_KEY")
-            print("💡 获取 API Key: https://help.aliyun.com/zh/model-studio/get-api-key")
             self.client = None
-        else:
-            # 清理 API Key（去除可能的空格和换行符）
-            self.api_key = self.api_key.strip()
-            
-            # 初始化 OpenAI 客户端（兼容模式）
-            try:
-                self.client = OpenAI(
-                    api_key=self.api_key,
-                    base_url=self.base_url,
-                )
-                # 检查 API Key 格式
-                api_key_preview = self.api_key[:8] + "..." + self.api_key[-4:] if len(self.api_key) > 12 else "***"
-                print(f"✅ LLM 服务已初始化，使用模型: {self.model}")
-                print(f"✅ API Key 预览: {api_key_preview}")
-                print(f"✅ API Key 长度: {len(self.api_key)} 字符")
-                print(f"✅ 地域: {self.region} ({self.base_url})")
-                
-                # 检查 API Key 格式
-                if not self.api_key.startswith('sk-'):
-                    print("⚠️  警告: API Key 通常以 'sk-' 开头，请确认 API Key 格式正确")
-                
-                # 检查地域和 API Key 是否匹配
-                if self.region == "singapore":
-                    print("💡 提示: 使用新加坡地域，请确保 API Key 来自新加坡地域页面")
-                else:
-                    print("💡 提示: 使用北京地域，请确保 API Key 来自北京地域页面")
-            except Exception as e:
-                print(f"❌ 初始化 OpenAI 客户端失败: {str(e)}")
-                self.client = None
+            return
+        
+        self.api_key = self.api_key.strip()
+        
+        try:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+            )
+        except Exception:
+            self.client = None
     
     def _call_dashscope_api(self, messages: List[Dict[str, str]], max_tokens: int = 2000, temperature: float = 0.7) -> str:
         """
@@ -101,59 +79,17 @@ class LLMService:
         if not self.client:
             raise ValueError("DASHSCOPE_API_KEY 或 MODEL_STUDIO_KEY 未设置，无法调用 API")
         
-        try:
-            completion = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature
-            )
-            
-            # 解析响应
-            if completion.choices and len(completion.choices) > 0:
-                return completion.choices[0].message.content
-            else:
-                raise ValueError("API 响应中没有返回内容")
-        except Exception as e:
-            error_msg = f"调用阿里云百炼平台 API 失败: {str(e)}"
-            print(f"❌ {error_msg}")
-            
-            # 如果是 401 错误，提供详细的排查建议
-            if "401" in str(e) or "invalid_api_key" in str(e) or "Incorrect API key" in str(e):
-                print("\n🔍 401 错误排查指南:")
-                print("   1. 确认 API Key 来自阿里云百炼平台（不是 DashScope）")
-                print("     获取地址: https://help.aliyun.com/zh/model-studio/get-api-key")
-                print("   2. 检查 API Key 是否完整（没有截断）")
-                print("   3. 确认 API Key 没有多余的空格、换行符或引号")
-                print("   4. 验证 API Key 是否已激活且有足够余额")
-                print("   5. 确认 API Key 有调用模型的权限")
-                print("   6. 如果使用新加坡地域的 API Key，请设置 region='singapore'")
-                print("\n💡 尝试以下解决方案:")
-                print("   - 重新生成 API Key")
-                print("   - 检查 .env 文件中的 API Key 格式（不要加引号）")
-                print("   - 确认使用的是百炼平台的 API Key，不是 DashScope 的")
-            
-            # 如果是 404 错误（模型不存在），提供建议
-            if "404" in str(e) or "model_not_found" in str(e) or "does not exist" in str(e):
-                print("\n🔍 404 错误排查指南:")
-                print(f"   当前使用的模型: {self.model}")
-                print("   可能的原因：")
-                print("   1. 模型名称不正确")
-                print("   2. 您的账户没有访问该模型的权限")
-                print("   3. 该模型在您使用的地域不可用")
-                print("\n💡 尝试以下解决方案:")
-                print("   1. 在 .env 文件中设置其他模型名称:")
-                print("      DASHSCOPE_MODEL=qwen-plus      # 通义千问 Plus")
-                print("      DASHSCOPE_MODEL=qwen-max       # 通义千问 Max")
-                print("      DASHSCOPE_MODEL=qwen-turbo     # 通义千问 Turbo")
-                print("      DASHSCOPE_MODEL=qwen-long      # 通义千问 Long（如果可用）")
-                print("   2. 查看可用模型列表:")
-                print("      https://help.aliyun.com/zh/model-studio/getting-started/models")
-                print("   3. 确认您的账户有访问该模型的权限")
-                print("   4. 检查模型是否在您使用的地域可用")
-            
-            print("\n💡 请参考文档: https://help.aliyun.com/zh/model-studio/developer-reference/error-code")
-            raise Exception(error_msg)
+        completion = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature
+        )
+        
+        if completion.choices and len(completion.choices) > 0:
+            return completion.choices[0].message.content
+        
+        raise ValueError("API 响应中没有返回内容")
         
     def chat(self, message: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -433,84 +369,3 @@ def verify_api_key_format(api_key: str) -> Dict[str, Any]:
     }
 
 
-if __name__ == "__main__":
-    # 测试 LLM 服务
-    print("=" * 60)
-    print("阿里云百炼平台 API 测试 (OpenAI 兼容接口)")
-    print("=" * 60)
-    print()
-    
-    # 从环境变量读取地域配置，默认为北京（与用户成功的配置一致）
-    region = os.getenv("DASHSCOPE_REGION", "beijing")
-    print(f"🌍 使用地域: {region}")
-    print("💡 提示: 可通过设置环境变量 DASHSCOPE_REGION=beijing 或 singapore 来指定地域")
-    print()
-    
-    llm_service = LLMService(region=region)
-    
-    # 检查 API Key 是否设置
-    if not llm_service.api_key or not llm_service.client:
-        print("❌ 错误: DASHSCOPE_API_KEY 或 MODEL_STUDIO_KEY 未设置")
-        print("请在 backend/.env 文件中设置:")
-        print("   DASHSCOPE_API_KEY=your_api_key")
-        print("   或")
-        print("   MODEL_STUDIO_KEY=your_api_key")
-        print()
-        print("💡 获取 API Key:")
-        print("   https://help.aliyun.com/zh/model-studio/get-api-key")
-        print()
-        print("📖 参考文档:")
-        print("   https://help.aliyun.com/zh/model-studio/developer-reference/error-code")
-    else:
-        print(f"✅ API Key 已设置")
-        print(f"✅ Base URL: {llm_service.base_url}")
-        print(f"✅ 模型: {llm_service.model}")
-        print()
-        
-        # 验证 API Key 格式
-        print("🔍 验证 API Key 格式...")
-        verification = verify_api_key_format(llm_service.api_key)
-        print(f"   长度: {verification['length']} 字符")
-        print(f"   预览: {verification['preview']}")
-        
-        if verification['valid']:
-            print("   ✅ API Key 格式检查通过")
-        else:
-            print("   ⚠️  API Key 格式问题:")
-            for issue in verification['issues']:
-                print(f"      - {issue}")
-            if verification['suggestions']:
-                print("   💡 建议:")
-                for suggestion in verification['suggestions']:
-                    print(f"      - {suggestion}")
-        print()
-        
-        print("💡 如果遇到错误，请检查：")
-        print("   1. API Key 格式是否正确（没有多余空格、换行符）")
-        print("   2. API Key 是否有调用 qwen-long-latest 的权限")
-        print("   3. API Key 是否已激活且有足够余额")
-        print("   4. 网络连接是否正常")
-        print("   5. 确认使用的是百炼平台的 API Key（不是 DashScope 的）")
-        print()
-        
-        print("正在测试 API 调用...")
-        print("-" * 60)
-        try:
-            result = llm_service.chat("你好，我是小明，我想咨询一下合同审批流程。")
-            print("\n✅ 测试成功！")
-            print("\n测试结果:")
-            print(json.dumps(result, ensure_ascii=False, indent=2))
-        except Exception as e:
-            print(f"\n❌ 测试失败: {str(e)}")
-            print()
-            print("🔧 排查建议:")
-            print("   1. 检查 backend/.env 文件中的 DASHSCOPE_API_KEY 或 MODEL_STUDIO_KEY 是否正确")
-            print("   2. 确认 API Key 来自阿里云百炼平台（不是 DashScope）")
-            print("   3. 确认 API Key 和 Base URL 的地域匹配：")
-            print(f"      - 当前使用地域: {llm_service.region}")
-            print(f"      - 当前 Base URL: {llm_service.base_url}")
-            print("      - 如果 API Key 来自新加坡地域页面，请确保使用新加坡地域")
-            print("      - 如果 API Key 来自北京地域页面，请设置 DASHSCOPE_REGION=beijing")
-            print("   4. 访问 https://help.aliyun.com/zh/model-studio/get-api-key 获取新的 API Key")
-            print("   5. 查看错误码文档: https://help.aliyun.com/zh/model-studio/developer-reference/error-code")
-    
