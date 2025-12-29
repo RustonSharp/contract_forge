@@ -13,6 +13,66 @@ from backend.utils.langdock.tools import BaseTool
 from backend.utils.langdock.models import ToolInfo, ToolParameter, ToolResult
 
 
+def find_file_in_uploads(file_path: str, uploads_dir: str = "./uploads") -> Optional[str]:
+    """
+    在 uploads 目录中查找文件
+    
+    支持以下查找方式：
+    1. 如果 file_path 是绝对路径且存在，直接返回
+    2. 如果 file_path 是相对路径且存在，直接返回
+    3. 如果只是文件名，在 uploads 目录下查找：
+       - 精确匹配文件名
+       - 匹配文件名（忽略扩展名）
+       - 匹配包含该文件名的文件
+    
+    Args:
+        file_path: 文件路径或文件名
+        uploads_dir: uploads 目录路径，默认为 "./uploads"
+    
+    Returns:
+        找到的文件完整路径，如果未找到返回 None
+    """
+    # 如果是绝对路径且存在，直接返回
+    if os.path.isabs(file_path) and os.path.exists(file_path):
+        return file_path
+    
+    # 如果是相对路径且存在，直接返回
+    if os.path.exists(file_path):
+        return os.path.abspath(file_path)
+    
+    # 在 uploads 目录中查找
+    uploads_path = Path(uploads_dir)
+    if not uploads_path.exists():
+        return None
+    
+    file_name = Path(file_path).name
+    file_stem = Path(file_path).stem  # 不带扩展名的文件名
+    
+    # 1. 精确匹配文件名
+    exact_match = uploads_path / file_name
+    if exact_match.exists() and exact_match.is_file():
+        return str(exact_match.resolve())
+    
+    # 2. 匹配文件名（忽略扩展名）
+    for file in uploads_path.iterdir():
+        if file.is_file() and file.stem == file_stem:
+            return str(file.resolve())
+    
+    # 3. 匹配文件名开头（适用于 UUID 开头的文件名）
+    # 例如：contract_id = "172c63a7-8698-49aa-89c8-cbc316e446b1"
+    # 可以匹配 "172c63a7-8698-49aa-89c8-cbc316e446b1_test_contract.pdf"
+    for file in uploads_path.iterdir():
+        if file.is_file() and file.name.startswith(file_name):
+            return str(file.resolve())
+    
+    # 4. 匹配包含该文件名的文件（部分匹配）
+    for file in uploads_path.iterdir():
+        if file.is_file() and file_name in file.name:
+            return str(file.resolve())
+    
+    return None
+
+
 class DocumentParserTool(BaseTool):
     """文档解析工具 - 支持 docx/pdf 文本提取"""
     
@@ -25,7 +85,7 @@ class DocumentParserTool(BaseTool):
                 ToolParameter(
                     name="file_path",
                     type="string",
-                    description="文档文件路径（支持 .docx 和 .pdf 格式）",
+                    description="文档文件路径或文件名（支持 .docx 和 .pdf 格式）。可以是完整路径，或仅文件名（程序会在 uploads 目录下自动查找）",
                     required=True
                 ),
                 ToolParameter(
@@ -57,13 +117,23 @@ class DocumentParserTool(BaseTool):
             file_path = kwargs.get("file_path")
             extract_structure = kwargs.get("extract_structure", True)
             
-            # 检查文件是否存在
-            if not os.path.exists(file_path):
+            # 查找文件（支持文件名自动查找）
+            resolved_path = find_file_in_uploads(file_path)
+            if not resolved_path:
+                # 尝试查找项目根目录下的 uploads
+                project_root = Path(__file__).resolve().parent.parent.parent.parent
+                uploads_dir = project_root / "uploads"
+                resolved_path = find_file_in_uploads(file_path, str(uploads_dir))
+            
+            if not resolved_path:
                 return ToolResult(
                     success=False,
-                    error=f"文件不存在: {file_path}",
+                    error=f"文件不存在: {file_path}。已尝试在 uploads 目录下查找，未找到匹配的文件。",
                     execution_time=time.time() - start_time
                 )
+            
+            # 使用找到的文件路径
+            file_path = resolved_path
             
             # 获取文件扩展名
             file_ext = Path(file_path).suffix.lower()
@@ -77,8 +147,9 @@ class DocumentParserTool(BaseTool):
                 try:
                     import fitz  # PyMuPDF
                     doc = fitz.open(file_path)
+                    total_pages = len(doc)  # 在关闭文档前保存总页数
                     pages = []
-                    for page_num in range(len(doc)):
+                    for page_num in range(total_pages):
                         page = doc[page_num]
                         text = page.get_text()
                         pages.append({
@@ -90,7 +161,7 @@ class DocumentParserTool(BaseTool):
                     
                     if extract_structure:
                         structure = {
-                            "total_pages": len(doc),
+                            "total_pages": total_pages,
                             "pages": pages
                         }
                 except ImportError:
@@ -230,7 +301,7 @@ class OCRParserTool(BaseTool):
             # 尝试使用 PaddleOCR（如果可用）
             ocr_text = ""
             try:
-                from paddleocr import PaddleOCR
+                from paddleocr import PaddleOCR  # type: ignore
                 ocr = PaddleOCR(use_angle_cls=True, lang='ch')
                 result = ocr.ocr(image_path, cls=True)
                 

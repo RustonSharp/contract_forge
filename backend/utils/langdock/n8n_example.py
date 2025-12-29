@@ -27,56 +27,28 @@ async def example_n8n_workflow_trigger():
         print("N8N 工作流触发工具未注册")
         return
     
-    # 示例1: 使用合同ID触发工作流
-    print("示例1: 使用合同ID触发工作流")
+
+    
+    # 示例2: 使用文件名触发工作流
+    print("示例2: 使用文件名触发工作流")
     result = await tool.run({
-        "contract_id": "contract-20250101-001"
+        "file_name": "4ed6db58-ff05-4b8a-b2a6-e6496b8072b0_test_contract.pdf"
     })
     
     if result.success:
         print(f"✓ 工作流触发成功")
-        print(f"合同ID: {result.data.get('contract_id')}")
-        print(f"Webhook URL: {result.data.get('webhook_url')}")
-        print(f"N8N 响应: {result.data.get('n8n_response')}")
-        print(f"执行时间: {result.execution_time:.2f} 秒")
+        print(f"文件名: {result.data.get('file_name')}")
     else:
         print(f"✗ 工作流触发失败: {result.error}")
     print()
-    
-    # 示例2: 指定文件路径
-    print("示例2: 指定文件路径触发工作流")
-    result = await tool.run({
-        "contract_id": "contract-20250101-002",
-        "file_path": "./uploads/contract-20250101-002.pdf"
-    })
-    
-    if result.success:
-        print(f"✓ 工作流触发成功")
-        print(f"文件路径: {result.data.get('file_path')}")
-    else:
-        print(f"✗ 工作流触发失败: {result.error}")
-    print()
-    
-    # 示例3: 使用自定义工作流路径
-    print("示例3: 使用自定义工作流路径")
-    result = await tool.run({
-        "contract_id": "contract-20250101-003",
-        "workflow_path": "/webhook/custom-workflow"
-    })
-    
-    if result.success:
-        print(f"✓ 工作流触发成功")
-        print(f"Webhook URL: {result.data.get('webhook_url')}")
-    else:
-        print(f"✗ 工作流触发失败: {result.error}")
-    print()
+
 
 
 async def example_llm_usage_scenario():
     """模拟大模型使用场景"""
     print("=== 大模型使用场景示例 ===\n")
     
-    print("场景: 用户说'处理合同文件 contract-20250101-001'")
+    print("场景: 用户说'处理合同文件 4ed6db58-ff05-4b8a-b2a6-e6496b8072b0_test_contract.pdf'")
     print("大模型应该识别这是一个泛泛的处理请求，使用 N8N 工作流触发工具\n")
     
     registry = get_registry()
@@ -85,7 +57,7 @@ async def example_llm_usage_scenario():
     if tool:
         # 模拟大模型调用
         result = await tool.execute(
-            contract_id="contract-20250101-001"
+            file_name="4ed6db58-ff05-4b8a-b2a6-e6496b8072b0_test_contract.pdf"
         )
         
         if result.success:

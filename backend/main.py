@@ -1,10 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 # 修改为全路径导入
 from backend.api import main_router
 from backend.utils.logger import get_logger, setup_logging
 import uvicorn
 import os
+import traceback
 
 # 初始化日志
 setup_logging()
@@ -33,6 +36,22 @@ if not os.path.exists(UPLOAD_DIR):
 
 # 3. 包含 API 路由
 app.include_router(main_router)
+
+# 4. 全局异常处理器
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """全局异常处理器，捕获所有未处理的异常"""
+    error_trace = traceback.format_exc()
+    logger.error(f"未处理的异常: {str(exc)}\n请求路径: {request.url.path}\n{error_trace}")
+    
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "success": False,
+            "error": f"内部服务器错误: {str(exc)}",
+            "detail": "详细信息请查看服务器日志"
+        }
+    )
 
 @app.get("/", tags=["Health Check"])
 async def health_check():

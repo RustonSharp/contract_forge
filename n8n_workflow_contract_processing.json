@@ -17,7 +17,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { \"status\": \"success\", \"message\": \"合同处理流程已启动\", \"contract_id\": $json.body.contract_id } }}"
+        "responseBody": "={{ { \"status\": \"success\", \"message\": \"合同处理流程已启动\", \"file_name\": $json.body.file_name } }}"
       },
       "id": "webhook-response",
       "name": "Webhook响应",
@@ -32,7 +32,7 @@
         "authentication": "none",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"tool_name\": \"document_parser\",\n  \"parameters\": {\n    \"file_path\": \"/path/to/contracts/{{ $('Webhook - 合同处理触发').item.json.body.contract_id }}.pdf\"\n  }\n}",
+        "jsonBody": "={\n  \"tool_name\": \"document_parser\",\n  \"parameters\": {\n    \"file_path\": \"{{ $('Webhook - 合同处理触发').item.json.body.file_name }}\"\n  }\n}",
         "options": {
           "response": {
             "response": {
@@ -56,7 +56,7 @@
         "authentication": "none",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"tool_name\": \"risk_assessment\",\n  \"parameters\": {\n    \"contract_text\": \"{{ $('步骤1: 文档解析').item.json.data.text_content }}\",\n    \"risk_types\": [\"legal\", \"financial\"]\n  }\n}",
+        "jsonBody": "={{ {\n  \"tool_name\": \"risk_assessment\",\n  \"parameters\": {\n    \"contract_text\": $('步骤1: 文档解析').item.json.body.data.text_content,\n    \"risk_types\": [\"legal\", \"financial\"]\n  }\n} }}",
         "options": {
           "response": {
             "response": {
@@ -84,7 +84,7 @@
           "conditions": [
             {
               "id": "low-risk-condition",
-              "leftValue": "={{ $('步骤2: 风险评估').item.json.data.overall_risk_level }}",
+              "leftValue": "={{ $('步骤2: 风险评估').item.json.body.data.overall_risk_level }}",
               "rightValue": "low",
               "operator": {
                 "type": "string",
@@ -93,7 +93,7 @@
             },
             {
               "id": "medium-risk-condition",
-              "leftValue": "={{ $('步骤2: 风险评估').item.json.data.overall_risk_level }}",
+              "leftValue": "={{ $('步骤2: 风险评估').item.json.body.data.overall_risk_level }}",
               "rightValue": "medium",
               "operator": {
                 "type": "string",
@@ -114,12 +114,12 @@
     },
     {
       "parameters": {
-        "url": "=http://host.docker.internal:8000/api/contracts/{{ $('Webhook - 合同处理触发').item.json.body.contract_id }}/auto-approve",
+        "url": "=http://host.docker.internal:8000/api/contracts/auto-approve",
         "method": "POST",
         "authentication": "none",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"contract_id\": \"{{ $('Webhook - 合同处理触发').item.json.body.contract_id }}\",\n  \"risk_level\": \"{{ $('步骤2: 风险评估').item.json.data.overall_risk_level }}\",\n  \"assessment_result\": {{ $('步骤2: 风险评估').item.json.data }}\n}",
+        "jsonBody": "={\n  \"file_name\": \"{{ $('Webhook - 合同处理触发').item.json.body.file_name }}\",\n  \"risk_level\": \"{{ $('步骤2: 风险评估').item.json.body.data.overall_risk_level }}\",\n  \"assessment_result\": {{ $('步骤2: 风险评估').item.json.body.data }}\n}",
         "options": {
           "response": {
             "response": {
@@ -139,9 +139,9 @@
       "parameters": {
         "fromEmail": "contract-system@company.com",
         "toEmail": "legal-team@company.com",
-        "subject": "=高风险合同需要人工审核 - 合同ID: {{ $('Webhook - 合同处理触发').item.json.body.contract_id }}",
+        "subject": "=高风险合同需要人工审核 - 文件名: {{ $('Webhook - 合同处理触发').item.json.body.file_name }}",
         "emailType": "html",
-        "message": "=<h2>高风险合同审核通知</h2>\n<p><strong>合同ID:</strong> {{ $('Webhook - 合同处理触发').item.json.body.contract_id }}</p>\n<p><strong>风险等级:</strong> {{ $('步骤2: 风险评估').item.json.data.overall_risk_level }}</p>\n<p><strong>风险评估结果:</strong></p>\n<pre>{{ JSON.stringify($('步骤2: 风险评估').item.json.data, null, 2) }}</pre>\n<p><strong>处理建议:</strong> 请法务团队尽快审核此合同。</p>",
+        "message": "=<h2>高风险合同审核通知</h2>\n<p><strong>文件名:</strong> {{ $('Webhook - 合同处理触发').item.json.body.file_name }}</p>\n<p><strong>风险等级:</strong> {{ $('步骤2: 风险评估').item.json.body.data.overall_risk_level }}</p>\n<p><strong>风险评估结果:</strong></p>\n<pre>{{ JSON.stringify($('步骤2: 风险评估').item.json.body.data, null, 2) }}</pre>\n<p><strong>处理建议:</strong> 请法务团队尽快审核此合同。</p>",
         "options": {}
       },
       "id": "email-node",
@@ -158,7 +158,7 @@
             {
               "id": "final-result",
               "name": "final_result",
-              "value": "={{ {\n  \"contract_id\": $('Webhook - 合同处理触发').item.json.body.contract_id,\n  \"status\": \"completed\",\n  \"risk_level\": $('步骤2: 风险评估').item.json.data.overall_risk_level,\n  \"action_taken\": $json.name === '低/中风险: 自动审批' ? 'auto_approved' : 'sent_to_legal'\n} }}"
+              "value": "={{ {\n  \"file_name\": $('Webhook - 合同处理触发').item.json.body.file_name,\n  \"status\": \"completed\",\n  \"risk_level\": $('步骤2: 风险评估').item.json.body.data.overall_risk_level,\n  \"action_taken\": $json.name === '低/中风险: 自动审批' ? 'auto_approved' : 'sent_to_legal'\n} }}"
             }
           ]
         },

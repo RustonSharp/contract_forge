@@ -50,16 +50,10 @@ class N8NWorkflowTriggerTool(BaseTool):
             description="触发 N8N 自动化工作流处理合同文件。当用户没有指定具体工具，只是要求处理文件时，应使用此工具执行完整的自动化流程（包括文档解析、合规校验、风险评估等）",
             parameters=[
                 ToolParameter(
-                    name="contract_id",
+                    name="file_name",
                     type="string",
-                    description="合同ID或文件标识符",
+                    description="合同文件名（可以是完整文件名或部分文件名，程序会在 uploads 目录下自动查找）",
                     required=True
-                ),
-                ToolParameter(
-                    name="file_path",
-                    type="string",
-                    description="合同文件路径（可选，如果不提供则使用 contract_id 构造路径）",
-                    required=False
                 ),
                 ToolParameter(
                     name="workflow_path",
@@ -93,15 +87,9 @@ class N8NWorkflowTriggerTool(BaseTool):
                     execution_time=time.time() - start_time
                 )
             
-            contract_id = kwargs.get("contract_id")
-            file_path = kwargs.get("file_path")
+            file_name = kwargs.get("file_name")
             workflow_path = kwargs.get("workflow_path", "/webhook/contract-process")
             http_method = kwargs.get("http_method", "POST").upper()
-            
-            # 如果没有提供 file_path，尝试从 contract_id 构造
-            if not file_path:
-                # 假设文件存储在 uploads 目录下
-                file_path = f"./uploads/{contract_id}"
             
             # 构建 N8N Webhook URL
             # 如果 N8N_API 环境变量已配置，检查是否包含完整路径
@@ -124,10 +112,9 @@ class N8NWorkflowTriggerTool(BaseTool):
                     workflow_path = "/" + workflow_path
                 webhook_url = f"{n8n_base_url}{workflow_path}"
             
-            # 准备请求数据
+            # 准备请求数据（仅传递 file_name）
             request_data = {
-                "contract_id": contract_id,
-                "file_path": file_path
+                "file_name": file_name
             }
             
             # 调用 N8N Webhook
@@ -149,8 +136,7 @@ class N8NWorkflowTriggerTool(BaseTool):
                             # 处理响应
                             if response.status == 200:
                                 result_data = {
-                                    "contract_id": contract_id,
-                                    "file_path": file_path,
+                                    "file_name": file_name,
                                     "webhook_url": webhook_url,
                                     "http_method": http_method,
                                     "n8n_response": response_data,
@@ -199,8 +185,7 @@ class N8NWorkflowTriggerTool(BaseTool):
                             # 处理响应
                             if response.status == 200:
                                 result_data = {
-                                    "contract_id": contract_id,
-                                    "file_path": file_path,
+                                    "file_name": file_name,
                                     "webhook_url": webhook_url,
                                     "http_method": http_method,
                                     "n8n_response": response_data,
