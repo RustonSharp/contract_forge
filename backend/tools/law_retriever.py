@@ -1,114 +1,75 @@
-import sys
-import os
-import chromadb
-from chromadb.utils import embedding_functions
-from typing import Dict, Any
-
-# 添加当前目录到模块搜索路径
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
+"""
+法规检索工具（MVP Mock 版）
+使用内置规则条目做简单关键词匹配，避免依赖向量库，便于开箱演示。
+"""
+from typing import Dict, Any, List
 from base import BaseTool
+
 
 class LawRetriever(BaseTool):
     name = "LawRetriever"
-    description = "根据语义关键词从ChromaDB向量数据库中检索相关法律法规"
+    description = "根据关键词检索内置法规条文（MVP Mock，无需向量库）"
 
-    def __init__(self, db_path="./chroma_db"):
+    def __init__(self):
         super().__init__()
-        # 1. 初始化 ChromaDB 客户端
-        self.client = chromadb.PersistentClient(path=db_path)
-        
-        # 2. 设置 Embedding 函数（默认使用 all-MiniLM-L6-v2）
-        # 如果需要更好的中文支持，可更换为 HuggingFaceBgeEmbeddings
-        self.emb_fn = embedding_functions.DefaultEmbeddingFunction()
-        
-        # 3. 获取或创建集合
-        self.collection = self.client.get_or_create_collection(
-            name="china_laws",
-            embedding_function=self.emb_fn
-        )
-        
-        # 4. 首次运行初始化数据（将你原来的 Mock 数据写入数据库）
-        self._init_database()
-
-    def _init_database(self):
-        """将初始法规条文存入向量数据库，确保语义搜索可用"""
-        if self.collection.count() == 0:
-            laws_to_add = [
-                {
-                    "id": "law-001",
-                    "content": "当事人可以约定一方违约时应当根据违约情况向对方支付一定数额的违约金。约定的违约金过分高于造成的损失的，人民法院或者仲裁机构可以根据当事人的请求予以适当减少。",
-                    "metadata": {"title": "《民法典》第585条", "scene": "违约金"}
-                },
-                {
-                    "id": "law-002",
-                    "content": "向人民法院请求保护民事权利的诉讼时效期间为三年。法律另有规定的，依照其规定。",
-                    "metadata": {"title": "《民法典》第188条", "scene": "诉讼时效"}
-                }
-            ]
-            
-            self.collection.add(
-                ids=[l["id"] for l in laws_to_add],
-                documents=[l["content"] for l in laws_to_add],
-                metadatas=[l["metadata"] for l in laws_to_add]
-            )
+        # 内置法规数据（可根据需求扩充）
+        self.laws: List[Dict[str, Any]] = [
+            {
+                "id": "law-001",
+                "title": "《民法典》第585条",
+                "content": "当事人可以约定一方违约时应当根据违约情况向对方支付一定数额的违约金。约定的违约金过分高于造成的损失的，人民法院或者仲裁机构可以根据当事人的请求予以适当减少。",
+                "applicable_scene": "违约金"
+            },
+            {
+                "id": "law-002",
+                "title": "《民法典》第188条",
+                "content": "向人民法院请求保护民事权利的诉讼时效期间为三年。法律另有规定的，依照其规定。",
+                "applicable_scene": "诉讼时效"
+            },
+            {
+                "id": "law-003",
+                "title": "《仲裁法》第5条",
+                "content": "当事人达成仲裁协议，一方向人民法院起诉的，人民法院不予受理，但仲裁协议无效的除外。",
+                "applicable_scene": "争议解决"
+            }
+        ]
 
     def run(self, input_data: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        # 提取关键词或合同条款描述
-        query_text = input_data.get("keywords", "")
-        if not query_text:
+        query_text = input_data.get("keywords", "") or ""
+        if not query_text.strip():
             return self._format_error("未提供检索关键词")
 
-        try:
-            # 5. 执行向量检索：寻找语义最相似的 2 条法律
-            results = self.collection.query(
-                query_texts=[query_text],
-                n_results=2
-            )
-            
-            # 6. 格式化结果
-            laws = []
-            if results['documents'] and len(results['documents'][0]) > 0:
-                for i in range(len(results['documents'][0])):
-                    # 只有当距离足够近（相关度高）时才返回，否则可能误导
-                    # distance 越小越相似，通常 < 1.0 比较可靠
-                    laws.append({
-                        "id": results['ids'][0][i],
-                        "title": results['metadatas'][0][i].get('title', '未知条文'),
-                        "content": results['documents'][0][i],
-                        "applicable_scene": results['metadatas'][0][i].get('scene', '通用'),
-                        "score": round(1 - results['distances'][0][i], 4) # 相似度分数
-                    })
-            
-            if not laws:
-                return self._format_success({"laws": [], "total": 0})
+        # 简单关键词匹配：按包含关系打分
+        query_lower = query_text.lower()
+        results = []
+        for law in self.laws:
+            title = law.get("title", "")
+            content = law.get("content", "")
+            scene = law.get("applicable_scene", "")
+            text_blob = f"{title} {content} {scene}".lower()
+            if any(k in text_blob for k in self._extract_keywords(query_lower)):
+                results.append({**law, "score": 0.9})
 
-            return self._format_success({
-                "laws": laws,
-                "total": len(laws)
-            })
-            
-        except Exception as e:
-            return self._format_error(f"检索过程发生异常: {str(e)}")
-    
+        return self._format_success({
+            "laws": results,
+            "total": len(results)
+        })
+
+    def _extract_keywords(self, query: str) -> List[str]:
+        # 粗略分词：按空格/逗号/顿号拆分，长度>1保留
+        seps = [",", "，", "、", " ", ";", "；"]
+        tmp = [query]
+        for sep in seps:
+            tmp = sum([s.split(sep) for s in tmp], [])
+        return [t.strip() for t in tmp if len(t.strip()) > 1]
+
     def _format_success(self, data):
-        return {
-            "status": "success",
-            "data": data
-        }
-    
+        return {"status": "success", "data": data}
+
     def _format_error(self, message, status_code="500"):
-        return {
-            "status": "error",
-            "message": message,
-            "status_code": status_code
-        }
+        return {"status": "error", "message": message, "status_code": status_code}
+
 
 if __name__ == "__main__":
-    # 测试向量检索
     tool = LawRetriever()
-    
-    # 哪怕关键词不完全一致（如“罚金” vs “违约金”），向量库也能搜到
-    print("--- 语义检索测试 ---")
-    result = tool.run({"keywords": "合同里的罚金太高了怎么办"}, {})
-    print(result)
+    print(tool.run({"keywords": "违约金 上限"}, {}))

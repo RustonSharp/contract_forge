@@ -256,15 +256,37 @@ const HomePage: React.FC = () => {
   // 处理文件上传后的审计
   const handleFileUpload = async (file: File) => {
     try {
-      const response = await contractApi.auditContract(file);
-      if (response.task_id) {
-        setCurrentTaskId(response.task_id);
-        // 开始轮询流程状态
-        fetchFlowState(response.task_id);
-        const interval = setInterval(() => {
+      // 默认使用 N8N 编排，除非明确设置为 false
+      const useLegacyAudit = import.meta.env.VITE_USE_LEGACY_AUDIT === 'true';
+
+      if (useLegacyAudit) {
+        // 旧方式：后端 /audit 直接运行 LangGraph
+        const response = await contractApi.auditContract(file);
+        if (response.task_id) {
+          setCurrentTaskId(response.task_id);
+          // 开始轮询流程状态
           fetchFlowState(response.task_id);
+          const interval = setInterval(() => {
+            fetchFlowState(response.task_id);
+          }, 2000);
+          // 30秒后停止轮询
+          setTimeout(() => clearInterval(interval), 30000);
+        }
+        return;
+      }
+
+      // 默认：使用 N8N 全编排工作流
+      // 1) 上传文件到后端，获取 task_id 和 server-side file_path
+      const prepared = await contractApi.uploadForOrchestration(file);
+      if (prepared?.task_id && prepared?.file_path) {
+        setCurrentTaskId(prepared.task_id);
+        // 2) 触发 N8N 全编排工作流
+        await contractApi.triggerN8nWorkflow(prepared.file_path, prepared.task_id);
+        // 3) 轮询流程状态（由 N8N 调用 /steps/* 写入 task_states）
+        fetchFlowState(prepared.task_id);
+        const interval = setInterval(() => {
+          fetchFlowState(prepared.task_id);
         }, 2000);
-        // 30秒后停止轮询
         setTimeout(() => clearInterval(interval), 30000);
       }
     } catch (error) {

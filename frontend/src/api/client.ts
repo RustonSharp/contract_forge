@@ -8,6 +8,10 @@ const api = axios.create({
   },
 });
 
+// N8N Webhook（本地默认端口 5678）
+const n8nWebhookUrl =
+  import.meta.env.VITE_N8N_WEBHOOK_URL || "http://localhost:5678/webhook/contractforge-mvp";
+
 export interface ChatContext {
   task_id?: string;
   user_id?: string;
@@ -58,6 +62,22 @@ export const contractApi = {
         "Content-Type": "multipart/form-data",
       },
     });
+    return response.data;
+  },
+
+  // N8N 全编排模式：仅上传并准备任务（后端不执行 LangGraph）
+  uploadForOrchestration: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await api.post("/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return response.data as { status: string; task_id: string; file_path: string };
+  },
+
+  // 触发 N8N 工作流执行（传入后端 file_path + task_id）
+  triggerN8nWorkflow: async (file_path: string, task_id: string) => {
+    const response = await axios.post(n8nWebhookUrl, { file_path, task_id });
     return response.data;
   },
 

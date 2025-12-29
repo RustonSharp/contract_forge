@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, CheckCircle2, XCircle, Info, Search, Download } from 'lucide-react';
+import { Clock, CheckCircle2, XCircle, Info, Search, Download, AlertTriangle } from 'lucide-react';
 import { contractApi } from '../api/client';
 
 interface LogEntry {
   step?: string;
   message: string;
   timestamp: string;
-  level?: 'info' | 'success' | 'error' | 'warning';
+  level?: 'info' | 'success' | 'error' | 'warning' | 'warn';
 }
 
 interface ExecutionLogsProps {
@@ -54,11 +54,33 @@ const ExecutionLogs: React.FC<ExecutionLogsProps> = ({
     log.step?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const levelColor = (level?: string) => {
+    if (!level) return 'border-gray-200';
+    const lv = level.toLowerCase();
+    if (lv === 'error') return 'border-red-200 bg-red-50';
+    if (lv === 'warning' || lv === 'warn') return 'border-amber-200 bg-amber-50';
+    if (lv === 'success') return 'border-green-200 bg-green-50';
+    if (lv === 'info') return 'border-blue-200 bg-blue-50';
+    return 'border-gray-200';
+  };
+
+  const levelTag = (level?: string) => {
+    if (!level) return null;
+    const lv = level.toLowerCase();
+    const base = "px-2 py-0.5 rounded-full text-xs font-medium";
+    if (lv === 'error') return <span className={`${base} bg-red-100 text-red-700`}>错误</span>;
+    if (lv === 'warning' || lv === 'warn') return <span className={`${base} bg-amber-100 text-amber-700`}>警告</span>;
+    if (lv === 'success') return <span className={`${base} bg-green-100 text-green-700`}>成功</span>;
+    return <span className={`${base} bg-blue-100 text-blue-700`}>信息</span>;
+  };
+
   const getLogIcon = (log: LogEntry) => {
     if (log.level === 'error') {
       return <XCircle className="w-4 h-4 text-red-600" />;
     } else if (log.level === 'success') {
       return <CheckCircle2 className="w-4 h-4 text-green-600" />;
+    } else if (log.level === 'warning' || log.level === 'warn') {
+      return <AlertTriangle className="w-4 h-4 text-amber-500" />;
     }
     return <Info className="w-4 h-4 text-blue-600" />;
   };
@@ -131,7 +153,7 @@ const ExecutionLogs: React.FC<ExecutionLogsProps> = ({
             {filteredLogs.map((log, index) => (
               <div
                 key={index}
-                className="flex gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+                className={`flex gap-3 p-3 rounded-lg border hover:bg-gray-50 transition-colors ${levelColor(log.level)}`}
               >
                 <div className="flex-shrink-0 mt-0.5">
                   {getLogIcon(log)}
@@ -139,12 +161,15 @@ const ExecutionLogs: React.FC<ExecutionLogsProps> = ({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1">
-                      {log.step && (
-                        <span className="text-sm font-medium text-gray-900 mr-2">
-                          [{log.step}]
-                        </span>
-                      )}
-                      <span className="text-sm text-gray-700">{log.message}</span>
+                      <div className="flex items-center gap-2">
+                        {log.step && (
+                          <span className="text-xs font-medium text-gray-700">
+                            [{log.step}]
+                          </span>
+                        )}
+                        {levelTag(log.level)}
+                      </div>
+                      <span className="text-sm text-gray-800">{log.message}</span>
                     </div>
                     <div className="flex items-center gap-1 text-xs text-gray-500 flex-shrink-0">
                       <Clock className="w-3 h-3" />

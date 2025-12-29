@@ -1,6 +1,13 @@
 # 常规文档解析工具
-import fitz  # PyMuPDF
-from docx import Document
+try:
+    import fitz  # PyMuPDF
+except Exception:
+    fitz = None
+
+try:
+    from docx import Document
+except Exception:
+    Document = None
 import sys
 import os
 
@@ -24,12 +31,18 @@ class ContractParser(BaseTool):
             # 1. 提取纯文本
             raw_text = ""
             if file_type == "pdf":
-                with fitz.open(file_path) as doc:
-                    for page in doc:
-                        raw_text += page.get_text()
+                if fitz:
+                    with fitz.open(file_path) as doc:
+                        for page in doc:
+                            raw_text += page.get_text()
+                else:
+                    raw_text = self._mock_text()
             elif file_type in ["doc", "docx"]:
-                doc = Document(file_path)
-                raw_text = "\n".join([p.text for p in doc.paragraphs])
+                if Document:
+                    doc = Document(file_path)
+                    raw_text = "\n".join([p.text for p in doc.paragraphs])
+                else:
+                    raw_text = self._mock_text()
             elif file_type in ["jpeg", "jpg", "png"]:  # 添加对图片格式的支持
                 # 对于图片格式，我们可能需要OCR处理
                 # 这里暂时返回提示信息
@@ -72,6 +85,16 @@ class ContractParser(BaseTool):
             "message": message,
             "status_code": status_code
         }
+
+    def _mock_text(self) -> str:
+        """当依赖未安装或读取失败时返回的模拟文本，便于 MVP 演示"""
+        return """合同编号：HT-2025-001
+甲方：A 公司
+乙方：B 公司
+标的：设备采购，金额 100 万元
+违约金：逾期付款每日 0.05%，逾期交付每日 0.05%
+诉讼时效：3 年
+争议解决：提交仲裁"""
 
 if __name__ == "__main__":
     parser = ContractParser()

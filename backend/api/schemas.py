@@ -72,3 +72,29 @@ class AuditResponse(BaseModel):
     status: str = Field("success", example="success")
     task_id: str
     report: AuditReport
+
+
+# ---- Step API DTOs (Langdock-style) ----
+class StepRunRequest(BaseModel):
+    """
+    统一步骤调用入参：
+    - input：步骤执行必需参数
+    - context：固定包含 task_id/step_id/history_results（由编排层维护）
+    """
+    input: Dict[str, Any] = Field(default_factory=dict)
+    context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StepRunResponse(BaseModel):
+    """统一步骤调用出参"""
+    status: str = Field(..., description="success/failed")
+    data: Dict[str, Any] = Field(default_factory=dict)
+    error_msg: str = ""
+    error_code: str = ""
+
+
+class UploadPrepareResponse(BaseModel):
+    """仅上传并准备任务（给 N8N 编排使用）"""
+    status: str = "success"
+    task_id: str
+    file_path: str

@@ -1,0 +1,236 @@
+{
+  "name": "ContractForge_MVP_FullOrchestration",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contractforge-mvp",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "id": "webhook-trigger",
+      "name": "Webhook_Trigger",
+      "notes": "输入示例：{ \"file_path\": \"/data/contract.pdf\", \"task_id\": \"<uuid>\" }\n建议 task_id 由后端 /api/v1/upload 返回；若不传可改用 $execution.id"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/v1/steps/parse",
+        "method": "POST",
+        "sendBody": true,
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"input\": { \"file_path\": $json.body.file_path },\n  \"context\": { \"task_id\": $json.body.task_id, \"step_id\": \"parse\", \"history_results\": {} }\n}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        520,
+        300
+      ],
+      "id": "step-parse",
+      "name": "Step_Parse",
+      "notes": "解析：根据扩展名自动选择 ContractParser/OCRParser"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/v1/steps/retrieve",
+        "method": "POST",
+        "sendBody": true,
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"input\": { \"raw_text\": $json.data.raw_text },\n  \"context\": { \"task_id\": $node[\"Webhook_Trigger\"].json.body.task_id, \"step_id\": \"retrieve\", \"history_results\": { \"parse\": $json.data } }\n}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        800,
+        300
+      ],
+      "id": "step-retrieve",
+      "name": "Step_Retrieve",
+      "notes": "检索：优先 LLM 提关键词，失败则退化为文本片段"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/v1/steps/evaluate",
+        "method": "POST",
+        "sendBody": true,
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"input\": {\n    \"raw_text\": $node[\"Step_Parse\"].json.data.raw_text,\n    \"structured_data\": $node[\"Step_Parse\"].json.data.structured_data,\n    \"referenced_laws\": $json.data.laws\n  },\n  \"context\": { \"task_id\": $node[\"Webhook_Trigger\"].json.body.task_id, \"step_id\": \"evaluate\", \"history_results\": { \"parse\": $node[\"Step_Parse\"].json.data, \"retrieve\": $json.data } }\n}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1080,
+        300
+      ],
+      "id": "step-evaluate",
+      "name": "Step_Evaluate",
+      "notes": "评估：三条合规规则 -> 风险项/评分/风险等级"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/v1/steps/approval",
+        "method": "POST",
+        "sendBody": true,
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"input\": { \"overall_risk_level\": $json.data.overall_risk_level },\n  \"context\": { \"task_id\": $node[\"Webhook_Trigger\"].json.body.task_id, \"step_id\": \"approval\", \"history_results\": { \"evaluate\": $json.data } }\n}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1360,
+        300
+      ],
+      "id": "step-approval",
+      "name": "Step_Approval",
+      "notes": "审批分支：High->manual_approval，其余->auto_approval（MVP 占位）"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.data.route }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "manual_approval",
+              "output": 0
+            },
+            {
+              "value2": "auto_approval",
+              "output": 1
+            }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        300
+      ],
+      "id": "switch-approval-route",
+      "name": "Switch_ApprovalRoute"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/v1/steps/report",
+        "method": "POST",
+        "sendBody": true,
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"input\": { \"template\": \"detailed\", \"format\": \"markdown\" },\n  \"context\": { \"task_id\": $node[\"Webhook_Trigger\"].json.body.task_id, \"step_id\": \"report\", \"history_results\": { \"evaluate\": $node[\"Step_Evaluate\"].json.data } }\n}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1920,
+        180
+      ],
+      "id": "step-report-manual",
+      "name": "Step_Report_Manual",
+      "notes": "人工审批路径：这里仅生成报告（邮件/工单后续补）"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/v1/steps/report",
+        "method": "POST",
+        "sendBody": true,
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"input\": { \"template\": \"detailed\", \"format\": \"markdown\" },\n  \"context\": { \"task_id\": $node[\"Webhook_Trigger\"].json.body.task_id, \"step_id\": \"report\", \"history_results\": { \"evaluate\": $node[\"Step_Evaluate\"].json.data } }\n}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1920,
+        420
+      ],
+      "id": "step-report-auto",
+      "name": "Step_Report_Auto",
+      "notes": "自动审批路径：这里仅生成报告（自动审批 API 后续补）"
+    }
+  ],
+  "connections": {
+    "Webhook_Trigger": {
+      "main": [
+        [
+          {
+            "node": "Step_Parse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step_Parse": {
+      "main": [
+        [
+          {
+            "node": "Step_Retrieve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step_Retrieve": {
+      "main": [
+        [
+          {
+            "node": "Step_Evaluate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step_Evaluate": {
+      "main": [
+        [
+          {
+            "node": "Step_Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step_Approval": {
+      "main": [
+        [
+          {
+            "node": "Switch_ApprovalRoute",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch_ApprovalRoute": {
+      "main": [
+        [
+          {
+            "node": "Step_Report_Manual",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Step_Report_Auto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {}
+}
+
+
