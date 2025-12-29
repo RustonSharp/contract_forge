@@ -6,7 +6,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
-from backend.utils.langdock.models import ToolInfo, ToolParameter, ToolResult
+from backend.service.tools.models import ToolInfo, ToolParameter, ToolResult
 
 
 class BaseTool(ABC):

@@ -7,15 +7,18 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 import traceback
 
-from backend.utils.langdock import get_registry
-from backend.utils.langdock.models import ToolInfo
-from backend.utils.langdock.initialize import initialize_default_tools
+from backend.service.tools.service import ToolService
+from backend.service.tools.models import ToolInfo
+from backend.service.tools.initialize import initialize_default_tools
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 # 创建工具模块的路由
 router = APIRouter(prefix="/tools", tags=["Tools"])
+
+# 初始化工具服务
+tool_service = ToolService()
 
 # 初始化默认工具（只初始化一次）
 _initialized = False
@@ -43,8 +46,7 @@ async def list_tools() -> List[ToolInfo]:
     """
     获取所有已注册的工具列表及其信息
     """
-    registry = get_registry()
-    return registry.list_tools()
+    return tool_service.list_tools()
 
 
 @router.get("/{tool_name}", summary="获取指定工具的信息")
@@ -52,11 +54,10 @@ async def get_tool_info(tool_name: str) -> ToolInfo:
     """
     获取指定工具的详细信息
     """
-    registry = get_registry()
-    tool = registry.get(tool_name)
-    if not tool:
+    tool_info = tool_service.get_tool_info(tool_name)
+    if not tool_info:
         raise HTTPException(status_code=404, detail=f"工具 '{tool_name}' 未找到")
-    return tool.info
+    return tool_info
 
 
 @router.post("/execute", summary="执行工具")
@@ -68,26 +69,11 @@ async def execute_tool(request: ToolExecuteRequest) -> ToolExecuteResponse:
     - **parameters**: 工具参数（键值对）
     """
     try:
-        logger.info(f"执行工具: {request.tool_name}, 参数: {request.parameters}")
-        
-        registry = get_registry()
-        tool = registry.get(request.tool_name)
-        
-        if not tool:
-            error_msg = f"工具 '{request.tool_name}' 未找到。可用工具: {registry.list_tool_names()}"
-            logger.warning(error_msg)
-            raise HTTPException(
-                status_code=404,
-                detail=error_msg
-            )
-        
-        # 执行工具
-        result = await tool.execute(**request.parameters)
-        
-        if result.success:
-            logger.info(f"工具 {request.tool_name} 执行成功，耗时: {result.execution_time:.3f}秒")
-        else:
-            logger.warning(f"工具 {request.tool_name} 执行失败: {result.error}")
+        # 调用Service层执行工具
+        result = await tool_service.execute_tool(
+            request.tool_name,
+            **request.parameters
+        )
         
         return ToolExecuteResponse(
             success=result.success,
@@ -96,6 +82,14 @@ async def execute_tool(request: ToolExecuteRequest) -> ToolExecuteResponse:
             execution_time=result.execution_time
         )
     
+    except ValueError as e:
+        # 工具不存在等业务错误
+        error_msg = str(e)
+        logger.warning(error_msg)
+        raise HTTPException(
+            status_code=404,
+            detail=error_msg
+        )
     except HTTPException:
         # 重新抛出 HTTP 异常（如 404）
         raise
@@ -118,6 +112,5 @@ async def list_tool_names() -> Dict[str, List[str]]:
     """
     获取所有已注册工具的名称列表
     """
-    registry = get_registry()
-    return {"tool_names": registry.list_tool_names()}
+    return {"tool_names": tool_service.list_tool_names()}
 

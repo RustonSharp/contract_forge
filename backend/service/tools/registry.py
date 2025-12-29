@@ -3,8 +3,8 @@
 """
 
 from typing import Dict, List, Optional
-from backend.utils.langdock.tools import BaseTool
-from backend.utils.langdock.models import ToolInfo
+from backend.service.tools.base import BaseTool
+from backend.service.tools.models import ToolInfo
 
 
 class ToolRegistry:
@@ -141,7 +141,7 @@ def get_registry() -> ToolRegistry:
 
 if __name__ == "__main__":
     # 导入并初始化工具
-    from backend.utils.langdock.initialize import initialize_default_tools
+    from backend.service.tools.initialize import initialize_default_tools
     
     print("初始化工具...")
     registry = initialize_default_tools()

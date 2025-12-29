@@ -10,8 +10,8 @@ from typing import Any, Dict, Optional
 from pathlib import Path
 from dotenv import load_dotenv
 
-from backend.utils.langdock.tools import BaseTool
-from backend.utils.langdock.models import ToolInfo, ToolParameter, ToolResult
+from backend.service.tools.base import BaseTool
+from backend.service.tools.models import ToolInfo, ToolParameter, ToolResult
 
 
 # 查找项目根目录并加载 .env

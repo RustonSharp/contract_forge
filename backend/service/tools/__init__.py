@@ -1,25 +1,23 @@
 """
-Langdock 工具注册模块
-
-用于注册和管理大模型可调用的工具，如风险评估工具等。
+工具服务模块
+提供工具注册、执行等业务逻辑
 """
 
-from backend.utils.langdock.registry import ToolRegistry, get_registry
-from backend.utils.langdock.tools import BaseTool, ToolResult, ContractAnalysisTool
-from backend.utils.langdock.core_tools import (
+from backend.service.tools.registry import ToolRegistry, get_registry
+from backend.service.tools.models import ToolInfo, ToolParameter, ToolResult
+from backend.service.tools.base import BaseTool
+from backend.service.tools.core_tools import (
     DocumentParserTool,
     OCRParserTool,
     RegulationSearchTool,
     RiskAssessmentTool,
-)
-from backend.utils.langdock.compliance_tools import (
     EnterpriseInfoQueryTool,
     SigningSubjectComplianceTool,
     CoreClausesCompletenessTool,
     LegalConflictComplianceTool,
 )
-from backend.utils.langdock.n8n_tools import N8NWorkflowTriggerTool
-from backend.utils.langdock.models import ToolInfo, ToolParameter
+from backend.service.tools.n8n_tools import N8NWorkflowTriggerTool
+from backend.service.tools.service import ToolService
 
 __all__ = [
     "ToolRegistry",
@@ -32,10 +30,11 @@ __all__ = [
     "OCRParserTool",
     "RegulationSearchTool",
     "RiskAssessmentTool",
-    "ContractAnalysisTool",
     "EnterpriseInfoQueryTool",
     "SigningSubjectComplianceTool",
     "CoreClausesCompletenessTool",
     "LegalConflictComplianceTool",
     "N8NWorkflowTriggerTool",
+    "ToolService",
 ]
+

@@ -2,21 +2,19 @@
 工具初始化模块 - 注册默认工具
 """
 
-from backend.utils.langdock.registry import get_registry
-from backend.utils.langdock.core_tools import (
+from backend.service.tools.registry import get_registry
+from backend.service.tools.core_tools import (
     DocumentParserTool,
     OCRParserTool,
     RegulationSearchTool,
     RiskAssessmentTool,
-)
-from backend.utils.langdock.compliance_tools import (
     EnterpriseInfoQueryTool,
     SigningSubjectComplianceTool,
     CoreClausesCompletenessTool,
     LegalConflictComplianceTool,
 )
-from backend.utils.langdock.n8n_tools import N8NWorkflowTriggerTool
-from backend.utils.langdock.tools import ContractAnalysisTool
+from backend.service.tools.n8n_tools import N8NWorkflowTriggerTool
+from backend.service.tools.base import ContractAnalysisTool
 
 
 def initialize_default_tools():
