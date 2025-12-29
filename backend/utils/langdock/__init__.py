@@ -12,6 +12,13 @@ from backend.utils.langdock.core_tools import (
     RegulationSearchTool,
     RiskAssessmentTool,
 )
+from backend.utils.langdock.compliance_tools import (
+    EnterpriseInfoQueryTool,
+    SigningSubjectComplianceTool,
+    CoreClausesCompletenessTool,
+    LegalConflictComplianceTool,
+)
+from backend.utils.langdock.n8n_tools import N8NWorkflowTriggerTool
 from backend.utils.langdock.models import ToolInfo, ToolParameter
 
 __all__ = [
@@ -26,4 +33,9 @@ __all__ = [
     "RegulationSearchTool",
     "RiskAssessmentTool",
     "ContractAnalysisTool",
+    "EnterpriseInfoQueryTool",
+    "SigningSubjectComplianceTool",
+    "CoreClausesCompletenessTool",
+    "LegalConflictComplianceTool",
+    "N8NWorkflowTriggerTool",
 ]

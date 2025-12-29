@@ -1,0 +1,263 @@
+{
+  "name": "合同处理自动化流程",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "webhook-trigger",
+      "name": "Webhook - 合同处理触发",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "contract-processing-webhook",
+      "httpMethod": "POST",
+      "path": "contract-process",
+      "responseMode": "responseNode",
+      "options": {}
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"success\", \"message\": \"合同处理流程已启动\", \"contract_id\": $json.body.contract_id } }}"
+      },
+      "id": "webhook-response",
+      "name": "Webhook响应",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [250, 500]
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/api/tools/execute",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"tool_name\": \"document_parser\",\n  \"parameters\": {\n    \"file_path\": \"/path/to/contracts/{{ $('Webhook - 合同处理触发').item.json.body.contract_id }}.pdf\"\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "api-call-1",
+      "name": "步骤1: 文档解析",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300],
+      "notes": "调用文档解析工具，提取合同文本"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/api/tools/execute",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"tool_name\": \"risk_assessment\",\n  \"parameters\": {\n    \"contract_text\": \"{{ $('步骤1: 文档解析').item.json.data.text_content }}\",\n    \"risk_types\": [\"legal\", \"financial\"]\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "api-call-2",
+      "name": "步骤2: 风险评估",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 300],
+      "notes": "调用风险评估工具，分析合同风险"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "low-risk-condition",
+              "leftValue": "={{ $('步骤2: 风险评估').item.json.data.overall_risk_level }}",
+              "rightValue": "low",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "medium-risk-condition",
+              "leftValue": "={{ $('步骤2: 风险评估').item.json.data.overall_risk_level }}",
+              "rightValue": "medium",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "switch-node",
+      "name": "风险等级判断",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1450, 300],
+      "notes": "根据风险等级进行分支处理"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/api/contracts/{{ $('Webhook - 合同处理触发').item.json.body.contract_id }}/auto-approve",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contract_id\": \"{{ $('Webhook - 合同处理触发').item.json.body.contract_id }}\",\n  \"risk_level\": \"{{ $('步骤2: 风险评估').item.json.data.overall_risk_level }}\",\n  \"assessment_result\": {{ $('步骤2: 风险评估').item.json.data }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "auto-approve-api",
+      "name": "低/中风险: 自动审批",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1850, 200],
+      "notes": "低风险或中风险合同，调用自动审批API"
+    },
+    {
+      "parameters": {
+        "fromEmail": "contract-system@company.com",
+        "toEmail": "legal-team@company.com",
+        "subject": "=高风险合同需要人工审核 - 合同ID: {{ $('Webhook - 合同处理触发').item.json.body.contract_id }}",
+        "emailType": "html",
+        "message": "=<h2>高风险合同审核通知</h2>\n<p><strong>合同ID:</strong> {{ $('Webhook - 合同处理触发').item.json.body.contract_id }}</p>\n<p><strong>风险等级:</strong> {{ $('步骤2: 风险评估').item.json.data.overall_risk_level }}</p>\n<p><strong>风险评估结果:</strong></p>\n<pre>{{ JSON.stringify($('步骤2: 风险评估').item.json.data, null, 2) }}</pre>\n<p><strong>处理建议:</strong> 请法务团队尽快审核此合同。</p>",
+        "options": {}
+      },
+      "id": "email-node",
+      "name": "高风险: 邮件通知法务",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1850, 400],
+      "notes": "高风险合同，发送邮件通知法务团队"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "final-result",
+              "name": "final_result",
+              "value": "={{ {\n  \"contract_id\": $('Webhook - 合同处理触发').item.json.body.contract_id,\n  \"status\": \"completed\",\n  \"risk_level\": $('步骤2: 风险评估').item.json.data.overall_risk_level,\n  \"action_taken\": $json.name === '低/中风险: 自动审批' ? 'auto_approved' : 'sent_to_legal'\n} }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-final-result",
+      "name": "设置最终结果",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [2250, 300],
+      "notes": "汇总最终处理结果"
+    }
+  ],
+  "connections": {
+    "Webhook - 合同处理触发": {
+      "main": [
+        [
+          {
+            "node": "Webhook响应",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "步骤1: 文档解析",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "步骤1: 文档解析": {
+      "main": [
+        [
+          {
+            "node": "步骤2: 风险评估",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "步骤2: 风险评估": {
+      "main": [
+        [
+          {
+            "node": "风险等级判断",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "风险等级判断": {
+      "main": [
+        [
+          {
+            "node": "低/中风险: 自动审批",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "高风险: 邮件通知法务",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "低/中风险: 自动审批": {
+      "main": [
+        [
+          {
+            "node": "设置最终结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "高风险: 邮件通知法务": {
+      "main": [
+        [
+          {
+            "node": "设置最终结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1"
+}
+

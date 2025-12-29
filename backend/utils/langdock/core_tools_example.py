@@ -1,7 +1,19 @@
 """
 核心工具使用示例
 演示如何使用 run(input, context) 标准接口
+
+运行方式：
+    python -m backend.utils.langdock.core_tools_example
 """
+
+import sys
+import os
+from pathlib import Path
+
+# 添加项目根目录到 Python 路径
+project_root = Path(__file__).resolve().parent.parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import asyncio
 from backend.utils.langdock import get_registry

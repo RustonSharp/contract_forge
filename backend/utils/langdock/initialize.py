@@ -9,6 +9,13 @@ from backend.utils.langdock.core_tools import (
     RegulationSearchTool,
     RiskAssessmentTool,
 )
+from backend.utils.langdock.compliance_tools import (
+    EnterpriseInfoQueryTool,
+    SigningSubjectComplianceTool,
+    CoreClausesCompletenessTool,
+    LegalConflictComplianceTool,
+)
+from backend.utils.langdock.n8n_tools import N8NWorkflowTriggerTool
 from backend.utils.langdock.tools import ContractAnalysisTool
 
 
@@ -38,6 +45,27 @@ def initialize_default_tools():
     # 5. 合同分析工具（可选）
     contract_analysis = ContractAnalysisTool()
     registry.register(contract_analysis)
+    
+    # 注册合规工具
+    # 6. 企业信息查询工具
+    enterprise_query = EnterpriseInfoQueryTool()
+    registry.register(enterprise_query)
+    
+    # 7. 签署主体合规校验工具
+    signing_subject = SigningSubjectComplianceTool()
+    registry.register(signing_subject)
+    
+    # 8. 核心条款完整性校验工具
+    core_clauses = CoreClausesCompletenessTool()
+    registry.register(core_clauses)
+    
+    # 9. 法规冲突校验工具
+    legal_conflict = LegalConflictComplianceTool()
+    registry.register(legal_conflict)
+    
+    # 10. N8N 工作流触发工具
+    n8n_trigger = N8NWorkflowTriggerTool()
+    registry.register(n8n_trigger)
     
     print(f"✓ 已注册 {registry.count()} 个工具:")
     for tool_name in registry.list_tool_names():
