@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import FileUpload from '../../components/FileUpload';
 import FlowViewer from '../../components/FlowViewer';
 import ExecutionLogs from '../../components/ExecutionLogs';
@@ -397,7 +398,45 @@ const HomePage: React.FC = () => {
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 text-gray-900'
                 }`}>
-                  <p className="whitespace-pre-wrap">{message.content}</p>
+                  {message.role === 'assistant' ? (
+                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                      <ReactMarkdown
+                        components={{
+                          // 自定义标题样式
+                          h1: ({...props}: any) => <h1 className="text-lg font-bold mt-4 mb-2 text-gray-900" {...props} />,
+                          h2: ({...props}: any) => <h2 className="text-base font-semibold mt-3 mb-2 text-gray-900" {...props} />,
+                          h3: ({...props}: any) => <h3 className="text-sm font-semibold mt-2 mb-1 text-gray-900" {...props} />,
+                          // 段落样式
+                          p: ({...props}: any) => <p className="mb-2 text-gray-900 leading-relaxed" {...props} />,
+                          // 列表样式
+                          ul: ({...props}: any) => <ul className="list-disc list-inside mb-2 space-y-1 text-gray-900" {...props} />,
+                          ol: ({...props}: any) => <ol className="list-decimal list-inside mb-2 space-y-1 text-gray-900" {...props} />,
+                          li: ({...props}: any) => <li className="ml-4 text-gray-900" {...props} />,
+                          // 代码块样式
+                          code: ({inline, ...props}: any) => 
+                            inline ? (
+                              <code className="bg-gray-200 px-1.5 py-0.5 rounded text-sm font-mono text-gray-800" {...props} />
+                            ) : (
+                              <code className="block bg-gray-200 p-2 rounded text-sm font-mono text-gray-800 overflow-x-auto mb-2" {...props} />
+                            ),
+                          pre: ({...props}: any) => <pre className="bg-gray-200 p-2 rounded text-sm font-mono text-gray-800 overflow-x-auto mb-2" {...props} />,
+                          // 链接样式
+                          a: ({...props}: any) => <a className="text-blue-600 hover:text-blue-800 underline" {...props} />,
+                          // 强调样式
+                          strong: ({...props}: any) => <strong className="font-semibold text-gray-900" {...props} />,
+                          em: ({...props}: any) => <em className="italic text-gray-900" {...props} />,
+                          // 引用样式
+                          blockquote: ({...props}: any) => <blockquote className="border-l-4 border-gray-300 pl-3 italic text-gray-700 mb-2" {...props} />,
+                          // 水平线
+                          hr: ({...props}: any) => <hr className="my-3 border-gray-300" {...props} />,
+                        }}
+                      >
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="whitespace-pre-wrap">{message.content}</p>
+                  )}
                   <p className={`mt-1 text-xs ${
                     message.role === 'user' ? 'text-blue-100' : 'text-gray-500'
                   }`}>

@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, List
 import json
 from openai import OpenAI
 from dotenv import load_dotenv
+from .context_manager import context_manager
 
 # 加载 .env 文件（从 backend 目录）
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
@@ -108,9 +109,14 @@ class LLMService:
         """
         # 构建提示词
         system_prompt = """你是一个专业的合同审计助手，能够帮助用户查询合同处理状态、分析风险、生成报告等。
-请根据用户的问题提供准确、专业的回答。"""
+请根据用户的问题提供准确、专业的回答。如果提供了合同内容，请基于合同内容进行详细分析。"""
         
-        # 添加上下文信息
+        # 从 context_manager 获取文件内容
+        task_context = None
+        if context and context.get('task_id'):
+            task_context = context_manager.get_context(context.get('task_id'))
+        
+        # 构建上下文信息
         context_info = ""
         if context:
             if context.get('task_id'):
@@ -118,15 +124,57 @@ class LLMService:
             if context.get('current_step'):
                 context_info += f"\n当前处理步骤: {context.get('current_step')}"
         
+        # 如果有任务上下文，添加合同内容
+        contract_content = ""
+        if task_context:
+            # 添加合同文本（限制长度，避免超出 token 限制）
+            raw_text = task_context.get('raw_text', '')
+            if raw_text:
+                # 如果文本太长，只取前8000字符
+                text_preview = raw_text[:8000] if len(raw_text) > 8000 else raw_text
+                contract_content += f"\n\n【合同内容】\n{text_preview}"
+                if len(raw_text) > 8000:
+                    contract_content += f"\n\n（注：合同内容较长，此处仅显示前8000字符，共{len(raw_text)}字符）"
+            
+            # 添加结构化数据摘要
+            structured_data = task_context.get('structured_data')
+            if structured_data:
+                contract_content += f"\n\n【结构化信息摘要】\n{json.dumps(structured_data, ensure_ascii=False, indent=2)[:2000]}"
+            
+            # 添加已识别的风险
+            risks = task_context.get('risks', [])
+            if risks:
+                contract_content += f"\n\n【已识别的风险点（共{len(risks)}项）】\n"
+                for i, risk in enumerate(risks[:5], 1):  # 只显示前5个风险
+                    contract_content += f"{i}. [{risk.get('risk_level', 'Unknown')}] {risk.get('risk_desc', '')}\n"
+                if len(risks) > 5:
+                    contract_content += f"... 还有 {len(risks) - 5} 个风险点\n"
+            
+            # 添加法规依据
+            referenced_laws = task_context.get('referenced_laws', [])
+            if referenced_laws:
+                contract_content += f"\n\n【相关法规依据（共{len(referenced_laws)}条）】\n"
+                for i, law in enumerate(referenced_laws[:3], 1):  # 只显示前3条
+                    title = law.get('title', '未知法规')
+                    contract_content += f"{i}. {title}\n"
+                if len(referenced_laws) > 3:
+                    contract_content += f"... 还有 {len(referenced_laws) - 3} 条法规\n"
+        
         # 构建 messages 格式
         messages = [
             {'role': 'system', 'content': system_prompt}
         ]
         
-        # 添加上下文信息到用户消息
+        # 添加上下文信息和合同内容到用户消息
         user_content = message
-        if context_info:
-            user_content = f"{context_info}\n\n用户问题: {message}"
+        if context_info or contract_content:
+            user_content = ""
+            if context_info:
+                user_content += context_info
+            if contract_content:
+                user_content += contract_content
+            user_content += f"\n\n【用户问题】\n{message}"
+        
         messages.append({'role': 'user', 'content': user_content})
         
         try:

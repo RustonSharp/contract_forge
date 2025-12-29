@@ -1,5 +1,5 @@
 
-from backend.services.state import ContractState
+from .state import ContractState
 
 
 def check_compliance(state: ContractState):
