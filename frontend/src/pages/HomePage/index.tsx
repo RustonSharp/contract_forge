@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import FileUpload from "../../components/FileUpload";
+import WorkflowPanel from "../../components/WorkflowPanel";
 import {
   Send,
   Bot,
@@ -10,6 +11,7 @@ import {
   Circle,
   Loader2,
   AlertCircle,
+  Workflow,
 } from "lucide-react";
 
 import {
@@ -42,6 +44,8 @@ const HomePage: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [workflowId, setWorkflowId] = useState<string | null>(null);
+  const [showWorkflowPanel, setShowWorkflowPanel] = useState(false);
   const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   const simulateAIResponse = async (userMessage: string) => {
@@ -70,6 +74,11 @@ const HomePage: React.FC = () => {
         response = await contractApi.chat(chatMessages);
       }
 
+      // 调试：打印完整响应
+      console.log("完整响应:", JSON.stringify(response, null, 2));
+      console.log("response.workflow_id:", response.workflow_id);
+      console.log("response.workflow_id 类型:", typeof response.workflow_id);
+
       const aiMessage: Message = {
         id: Date.now().toString(),
         role: "assistant",
@@ -83,8 +92,19 @@ const HomePage: React.FC = () => {
       setMessages((prev) => [...prev, aiMessage]);
 
       // 如果有 workflow_id，开始轮询工作流状态
-      if (response.workflow_id) {
+      if (response.workflow_id && response.workflow_id.trim()) {
+        console.log("✅ 收到 workflow_id:", response.workflow_id);
+        setWorkflowId(response.workflow_id);
         startWorkflowPolling(response.workflow_id, aiMessage.id);
+      } else {
+        console.log("❌ 响应中没有 workflow_id", {
+          workflow_id: response.workflow_id,
+          has_workflow_id: !!response.workflow_id,
+          workflow_id_trimmed: response.workflow_id?.trim(),
+          full_response: response
+        });
+        // 如果这次响应没有 workflow_id，不清除之前的 workflowId
+        // 这样用户可以继续查看之前的工作流进度
       }
       // 如果需要确认多个文件处理
       if ((response as any).requires_confirmation && (response as any).files) {
@@ -155,6 +175,7 @@ const HomePage: React.FC = () => {
     setMessages((prev) => [...prev, userMessage]);
     simulateAIResponse(input);
     setInput("");
+    // 注意：不在这里清除 workflowId，因为用户可能想继续查看之前的工作流进度
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -279,10 +300,28 @@ const HomePage: React.FC = () => {
         {/* Center Panel - Chat */}
         <div className="flex-1 rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
           {/* Chat Header */}
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-gray-900">AI 助手</h2>
-            {selectedContract && (
-              <p className="text-gray-500">当前合同：{selectedContract.name}</p>
+          <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <div>
+              <h2 className="text-gray-900">AI 助手</h2>
+              {selectedContract && (
+                <p className="text-gray-500">当前合同：{selectedContract.name}</p>
+              )}
+            </div>
+            {workflowId && workflowId.trim() ? (
+              <button
+                onClick={() => {
+                  console.log("打开工作流面板，workflowId:", workflowId);
+                  setShowWorkflowPanel(true);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+              >
+                <Workflow className="w-4 h-4" />
+                <span>查看工作流进度</span>
+              </button>
+            ) : (
+              <div className="text-xs text-gray-400" style={{ display: 'none' }}>
+                {/* 调试：当前 workflowId = {workflowId || "null"} */}
+              </div>
             )}
           </div>
 
@@ -483,6 +522,14 @@ const HomePage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Workflow Panel */}
+      {showWorkflowPanel && workflowId && (
+        <WorkflowPanel
+          workflowId={workflowId}
+          onClose={() => setShowWorkflowPanel(false)}
+        />
+      )}
     </div>
   );
 };

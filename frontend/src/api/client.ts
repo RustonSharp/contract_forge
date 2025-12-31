@@ -59,6 +59,38 @@ export interface WorkflowStatusResponse {
   updated_at: string;
 }
 
+// 工作流节点接口
+export interface WorkflowNode {
+  id: string;
+  name: string;
+  type: string;
+  position: number[];
+  notes?: string;
+  parameters?: Record<string, any>;
+}
+
+// 工作流定义响应接口
+export interface WorkflowDefinitionResponse {
+  name: string;
+  nodes: WorkflowNode[];
+  connections: Record<string, any>;
+  active: boolean;
+}
+
+// 工作流进度响应接口
+export interface WorkflowProgressResponse {
+  workflow_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  current_node?: string;
+  completed_nodes: string[];
+  file_path?: string;
+  result?: Record<string, any>;
+  message?: string;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // 工具信息接口
 export interface ToolInfo {
   name: string;
@@ -182,6 +214,20 @@ export const contractApi = {
   getWorkflowStatus: async (workflowId: string) => {
     const response = await api.get(`/workflow/status/${workflowId}`);
     return response.data as WorkflowStatusResponse;
+  },
+
+  // 获取完整工作流程定义
+  getWorkflowDefinition: async (configFile: string = "合同处理自动化流程.json") => {
+    const response = await api.get("/workflow/definition", {
+      params: { config_file: configFile },
+    });
+    return response.data as WorkflowDefinitionResponse;
+  },
+
+  // 获取工作流当前进度
+  getWorkflowProgress: async (workflowId: string) => {
+    const response = await api.get(`/workflow/progress/${workflowId}`);
+    return response.data as WorkflowProgressResponse;
   },
 };
 
