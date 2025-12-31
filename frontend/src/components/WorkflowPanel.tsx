@@ -187,14 +187,14 @@ const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-end">
-      {/* 背景遮罩 */}
+      {/* 背景遮罩 - 毛玻璃效果 */}
       <div
-        className="absolute inset-0 bg-black bg-opacity-50 transition-opacity"
+        className="absolute inset-0 backdrop-blur-sm bg-black/20 transition-opacity"
         onClick={onClose}
       />
 
-      {/* 面板 */}
-      <div className="relative w-full max-w-2xl h-full bg-white shadow-xl flex flex-col animate-slide-in-right">
+      {/* 面板 - 更宽的宽度 */}
+      <div className="relative w-full max-w-4xl h-full bg-white shadow-xl flex flex-col animate-slide-in-right">
         {/* 头部 */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div>
