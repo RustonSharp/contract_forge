@@ -238,12 +238,16 @@ async def get_workflow_definition(
         with open(config_path, "r", encoding="utf-8") as f:
             workflow_data = json.load(f)
         
-        # 提取节点信息，过滤掉状态更新节点
+        # 提取节点信息，过滤掉状态更新节点和 Set 节点（传递数据节点）
         nodes = []
         for node_data in workflow_data.get("nodes", []):
             node_name = node_data.get("name", "")
+            node_type = node_data.get("type", "")
             # 过滤掉状态更新节点（名称包含"更新状态"或"更新工作流状态"）
             if "更新状态" in node_name or "更新工作流状态" in node_name:
+                continue
+            # 过滤掉 Set 节点（传递数据节点，名称包含"传递数据"）
+            if "传递数据" in node_name:
                 continue
             
             node = WorkflowNode(
@@ -256,25 +260,25 @@ async def get_workflow_definition(
             )
             nodes.append(node)
         
-        # 过滤连接关系，移除对状态更新节点的引用，并跳过状态更新节点直接连接
+        # 过滤连接关系，移除对状态更新节点和 Set 节点的引用，并跳过这些节点直接连接
         filtered_connections = {}
         connections = workflow_data.get("connections", {})
-        status_update_node_names = {
+        filtered_node_names = {
             node_name for node_name in connections.keys()
-            if "更新状态" in node_name or "更新工作流状态" in node_name
+            if "更新状态" in node_name or "更新工作流状态" in node_name or "传递数据" in node_name
         }
         
-        # 递归查找下一个非状态更新节点
+        # 递归查找下一个有效节点（跳过状态更新节点和 Set 节点）
         def find_next_valid_node(node_name: str, visited: set = None) -> list:
-            """递归查找下一个有效的（非状态更新）节点"""
+            """递归查找下一个有效的节点（跳过状态更新节点和 Set 节点）"""
             if visited is None:
                 visited = set()
             if node_name in visited:
                 return []  # 防止循环
             visited.add(node_name)
             
-            # 如果是状态更新节点，继续查找它的下一个节点
-            if "更新状态" in node_name or "更新工作流状态" in node_name:
+            # 如果是状态更新节点或 Set 节点，继续查找它的下一个节点
+            if "更新状态" in node_name or "更新工作流状态" in node_name or "传递数据" in node_name:
                 node_conn = connections.get(node_name)
                 if node_conn and "main" in node_conn:
                     result = []
@@ -286,12 +290,12 @@ async def get_workflow_definition(
                     return result
                 return []
             else:
-                # 非状态更新节点，直接返回
+                # 有效节点，直接返回
                 return [node_name]
         
         for source_node, connection_data in connections.items():
-            # 跳过状态更新节点作为源节点
-            if "更新状态" in source_node or "更新工作流状态" in source_node:
+            # 跳过状态更新节点和 Set 节点作为源节点
+            if "更新状态" in source_node or "更新工作流状态" in source_node or "传递数据" in source_node:
                 continue
             
             # 过滤并跳过状态更新节点

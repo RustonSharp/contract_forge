@@ -4,7 +4,6 @@ import { contractApi } from "../api/client";
 import type {
   WorkflowDefinitionResponse,
   WorkflowProgressResponse,
-  WorkflowNode,
 } from "../api/client";
 
 interface WorkflowPanelProps {
@@ -165,7 +164,6 @@ const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
     mergeNode?: TreeNode; // 合并节点（如果分支合并）
   }
 
-
   // 检查分支是否合并（基于连接关系）
   const checkBranchMerge = (
     branches: TreeNode[][],
@@ -186,9 +184,11 @@ const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
     if (lastNodeNames.length < 2) return null;
 
     // 检查这些节点的连接关系，看是否都指向同一个节点
-    const targetNodes = new Set<string>();
+    // 收集每个分支的最后一个节点指向的所有有效目标节点
+    const branchTargets: string[][] = [];
     lastNodeNames.forEach((nodeName) => {
       const nodeConnections = connections[nodeName];
+      const targets: string[] = [];
       if (nodeConnections?.main) {
         nodeConnections.main.forEach((outputs: any[]) => {
           outputs.forEach((output: any) => {
@@ -196,24 +196,35 @@ const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
             if (
               target &&
               !target.includes("更新状态") &&
-              !target.includes("更新工作流状态")
+              !target.includes("更新工作流状态") &&
+              nodeMapByName.has(target) // 确保目标节点存在于节点映射中
             ) {
-              targetNodes.add(target);
+              targets.push(target);
             }
           });
         });
       }
+      branchTargets.push(targets);
     });
 
-    // 如果所有分支都指向同一个节点，说明合并了
-    if (targetNodes.size === 1) {
-      const mergeNodeName = Array.from(targetNodes)[0];
-      // 返回合并节点名称，让 buildTree 函数来构建完整的树
-      // 这里只返回一个标记，实际构建在 buildTree 中完成
+    // 只有当所有分支的最后一个节点都指向同一个有效节点时，才认为是合并
+    // 1. 所有分支都必须有至少一个目标节点
+    if (branchTargets.some((targets) => targets.length === 0)) {
+      return null; // 有些分支没有指向任何有效节点，不是合并
+    }
+
+    // 2. 所有分支的目标节点集合必须完全相同，且只有一个目标节点
+    const firstBranchTargets = new Set(branchTargets[0]);
+    const allTargetsSame = branchTargets.every((targets) => {
+      if (targets.length !== firstBranchTargets.size) return false;
+      return targets.every((target) => firstBranchTargets.has(target));
+    });
+
+    // 3. 如果所有分支都指向同一个节点（且只有一个目标节点），说明合并了
+    if (allTargetsSame && firstBranchTargets.size === 1) {
+      const mergeNodeName = Array.from(firstBranchTargets)[0];
       const mergeNode = nodeMapByName.get(mergeNodeName);
       if (mergeNode) {
-        // 注意：这里返回的节点需要由 buildTree 递归构建
-        // 所以我们需要在 buildTree 中处理合并逻辑
         return {
           node: mergeNode,
           children: undefined,
