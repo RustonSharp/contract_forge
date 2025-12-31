@@ -30,6 +30,8 @@ class UpdateWorkflowStatusRequest(BaseModel):
     result: Optional[Dict[str, Any]] = None
     message: Optional[str] = None
     error: Optional[str] = None
+    current_node: Optional[str] = None  # 当前执行的节点名称
+    completed_nodes: Optional[List[str]] = None  # 已完成的节点名称列表
 
 
 class UpdateWorkflowStatusResponse(BaseModel):
@@ -74,11 +76,26 @@ async def update_workflow_status(request: UpdateWorkflowStatusRequest) -> Update
                 detail=f"无效的状态值: {request.status}。有效值: {', '.join([s.value for s in WorkflowStatus])}"
             )
         
+        # 处理节点进度信息：合并到 result 中
+        result_data = request.result or {}
+        if request.current_node:
+            result_data["current_node"] = request.current_node
+        if request.completed_nodes:
+            # 获取现有已完成的节点列表，合并新节点
+            existing_status = workflow_status_service.get_workflow_status(request.workflow_id)
+            existing_completed = []
+            if existing_status and existing_status.get("result") and isinstance(existing_status.get("result"), dict):
+                existing_completed = existing_status["result"].get("completed_nodes", [])
+            
+            # 合并并去重
+            all_completed = list(set(existing_completed + request.completed_nodes))
+            result_data["completed_nodes"] = all_completed
+        
         # 更新状态
         success = workflow_status_service.update_workflow_status(
             workflow_id=request.workflow_id,
             status=status_enum,
-            result=request.result,
+            result=result_data if result_data else None,
             message=request.message,
             error=request.error
         )
@@ -221,12 +238,17 @@ async def get_workflow_definition(
         with open(config_path, "r", encoding="utf-8") as f:
             workflow_data = json.load(f)
         
-        # 提取节点信息
+        # 提取节点信息，过滤掉状态更新节点
         nodes = []
         for node_data in workflow_data.get("nodes", []):
+            node_name = node_data.get("name", "")
+            # 过滤掉状态更新节点（名称包含"更新状态"或"更新工作流状态"）
+            if "更新状态" in node_name or "更新工作流状态" in node_name:
+                continue
+            
             node = WorkflowNode(
                 id=node_data.get("id", ""),
-                name=node_data.get("name", ""),
+                name=node_name,
                 type=node_data.get("type", ""),
                 position=node_data.get("position", [0, 0]),
                 notes=node_data.get("notes"),
@@ -234,12 +256,80 @@ async def get_workflow_definition(
             )
             nodes.append(node)
         
-        logger.info(f"读取工作流定义: {config_file}, 节点数: {len(nodes)}")
+        # 过滤连接关系，移除对状态更新节点的引用，并跳过状态更新节点直接连接
+        filtered_connections = {}
+        connections = workflow_data.get("connections", {})
+        status_update_node_names = {
+            node_name for node_name in connections.keys()
+            if "更新状态" in node_name or "更新工作流状态" in node_name
+        }
+        
+        # 递归查找下一个非状态更新节点
+        def find_next_valid_node(node_name: str, visited: set = None) -> list:
+            """递归查找下一个有效的（非状态更新）节点"""
+            if visited is None:
+                visited = set()
+            if node_name in visited:
+                return []  # 防止循环
+            visited.add(node_name)
+            
+            # 如果是状态更新节点，继续查找它的下一个节点
+            if "更新状态" in node_name or "更新工作流状态" in node_name:
+                node_conn = connections.get(node_name)
+                if node_conn and "main" in node_conn:
+                    result = []
+                    for output_group in node_conn["main"]:
+                        for output in output_group:
+                            next_node = output.get("node", "")
+                            if next_node:
+                                result.extend(find_next_valid_node(next_node, visited))
+                    return result
+                return []
+            else:
+                # 非状态更新节点，直接返回
+                return [node_name]
+        
+        for source_node, connection_data in connections.items():
+            # 跳过状态更新节点作为源节点
+            if "更新状态" in source_node or "更新工作流状态" in source_node:
+                continue
+            
+            # 过滤并跳过状态更新节点
+            if "main" in connection_data:
+                filtered_main = []
+                for output_group in connection_data["main"]:
+                    filtered_output_group = []
+                    for output in output_group:
+                        target_node = output.get("node", "")
+                        if not target_node:
+                            continue
+                        
+                        # 如果目标节点是状态更新节点，查找它的下一个有效节点
+                        if "更新状态" in target_node or "更新工作流状态" in target_node:
+                            valid_nodes = find_next_valid_node(target_node)
+                            for valid_node in valid_nodes:
+                                if valid_node and valid_node in [n.name for n in nodes]:
+                                    filtered_output_group.append({
+                                        "node": valid_node,
+                                        "type": output.get("type", "main"),
+                                        "index": output.get("index", 0)
+                                    })
+                        else:
+                            # 直接指向非状态更新节点
+                            filtered_output_group.append(output)
+                    
+                    if filtered_output_group:
+                        filtered_main.append(filtered_output_group)
+                
+                if filtered_main:
+                    filtered_connections[source_node] = {"main": filtered_main}
+        
+        logger.info(f"读取工作流定义: {config_file}, 节点数: {len(nodes)} (已过滤状态更新节点)")
         
         return WorkflowDefinitionResponse(
             name=workflow_data.get("name", ""),
             nodes=nodes,
-            connections=workflow_data.get("connections", {}),
+            connections=filtered_connections,
             active=workflow_data.get("active", False)
         )
     

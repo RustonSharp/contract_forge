@@ -45,7 +45,7 @@ const HomePage: React.FC = () => {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [workflowId, setWorkflowId] = useState<string | null>(null);
-  const [showWorkflowPanel, setShowWorkflowPanel] = useState(false);
+  const [showWorkflowPanel, setShowWorkflowPanel] = useState(false); // 默认关闭，当收到 workflow_id 时自动打开
   const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   const simulateAIResponse = async (userMessage: string) => {
@@ -91,10 +91,11 @@ const HomePage: React.FC = () => {
 
       setMessages((prev) => [...prev, aiMessage]);
 
-      // 如果有 workflow_id，开始轮询工作流状态
+      // 如果有 workflow_id，开始轮询工作流状态并自动打开工作流面板
       if (response.workflow_id && response.workflow_id.trim()) {
         console.log("✅ 收到 workflow_id:", response.workflow_id);
         setWorkflowId(response.workflow_id);
+        setShowWorkflowPanel(true); // 自动打开工作流面板
         startWorkflowPolling(response.workflow_id, aiMessage.id);
       } else {
         console.log("❌ 响应中没有 workflow_id", {
@@ -523,8 +524,8 @@ const HomePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Workflow Panel */}
-      {showWorkflowPanel && workflowId && (
+      {/* Workflow Panel - 默认打开，方便测试 */}
+      {showWorkflowPanel && (
         <WorkflowPanel
           workflowId={workflowId}
           onClose={() => setShowWorkflowPanel(false)}
