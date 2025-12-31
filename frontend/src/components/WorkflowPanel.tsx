@@ -32,15 +32,24 @@ const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
 
   // 获取工作流进度
   const fetchProgress = useCallback(async () => {
-    if (!workflowId) return;
+    if (!workflowId) return false; // 返回 false 表示应该停止轮询
 
     try {
       const data = await contractApi.getWorkflowProgress(workflowId);
       setProgress(data);
       setError(null);
+      return true; // 返回 true 表示可以继续轮询
     } catch (err: any) {
+      // 如果是 404 错误，说明工作流记录不存在，停止轮询
+      if (err.response?.status === 404) {
+        setError("工作流记录不存在，可能已被清理或尚未创建");
+        console.warn("工作流记录不存在:", workflowId);
+        return false; // 返回 false 表示应该停止轮询
+      }
+      // 其他错误，显示错误信息但继续尝试
       setError(`获取工作流进度失败: ${err.message}`);
       console.error("获取工作流进度失败:", err);
+      return true; // 继续轮询，可能只是临时错误
     }
   }, [workflowId]);
 
@@ -63,13 +72,22 @@ const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
       return;
     }
 
+    // 如果有错误且是 404，停止轮询
+    if (error && error.includes("工作流记录不存在")) {
+      return;
+    }
+
     // 每 2 秒轮询一次
-    const interval = setInterval(() => {
-      fetchProgress();
+    const interval = setInterval(async () => {
+      const shouldContinue = await fetchProgress();
+      // 如果 fetchProgress 返回 false，说明应该停止轮询（如 404 错误）
+      if (!shouldContinue) {
+        clearInterval(interval);
+      }
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [workflowId, progress?.status, fetchProgress]);
+  }, [workflowId, progress?.status, error, fetchProgress]);
 
   // 获取节点状态
   const getNodeStatus = (nodeId: string, nodeName: string) => {
