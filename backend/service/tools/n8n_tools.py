@@ -123,10 +123,11 @@ class N8NWorkflowTriggerTool(BaseTool):
                     # 根据 HTTP 方法选择请求方式
                     if http_method == "GET":
                         # GET 请求：将参数作为查询字符串
+                        # 增加超时时间以支持长时间运行的工作流（5分钟）
                         async with session.get(
                             webhook_url,
                             params=request_data,
-                            timeout=aiohttp.ClientTimeout(total=60)
+                            timeout=aiohttp.ClientTimeout(total=300)
                         ) as response:
                             try:
                                 response_data = await response.json()
@@ -172,10 +173,11 @@ class N8NWorkflowTriggerTool(BaseTool):
                                 )
                     else:
                         # POST 请求：将参数作为 JSON body
+                        # 增加超时时间以支持长时间运行的工作流（5分钟）
                         async with session.post(
                             webhook_url,
                             json=request_data,
-                            timeout=aiohttp.ClientTimeout(total=60)
+                            timeout=aiohttp.ClientTimeout(total=300)
                         ) as response:
                             try:
                                 response_data = await response.json()

@@ -844,21 +844,69 @@ class LLMChatService:
                     result_data = tool_result.get("data", {})
                     n8n_response = result_data.get("n8n_response", {})
                     
-                    # 如果 n8n_response 中包含 message 字段，使用它作为最终消息
-                    if isinstance(n8n_response, dict) and "message" in n8n_response:
-                        final_message = n8n_response["message"]
-                    # 如果 n8n_response 本身就是字符串，直接使用
+                    # 提取消息内容和处理结果
+                    message_from_response = None
+                    result_content = None
+                    
+                    if isinstance(n8n_response, dict):
+                        # 尝试提取消息
+                        message_from_response = n8n_response.get("message") or n8n_response.get("result") or n8n_response.get("data")
+                        # 尝试提取结果数据（可能在不同的字段中）
+                        result_content = n8n_response.get("result") or n8n_response.get("data") or n8n_response.get("output") or n8n_response
                     elif isinstance(n8n_response, str):
-                        final_message = n8n_response
-                    # 如果 result_data 中包含 message 字段，使用它
-                    elif "message" in result_data:
-                        final_message = result_data["message"]
-                    # 否则，尝试格式化整个响应数据
-                    elif n8n_response:
+                        message_from_response = n8n_response
+                        result_content = n8n_response
+                    
+                    # 检查是否是异步启动消息（工作流已启动但还在处理中）
+                    async_start_messages = ["workflow was started", "workflow started", "工作流已启动", "已启动"]
+                    is_async_start = False
+                    if message_from_response:
+                        message_lower = str(message_from_response).lower()
+                        is_async_start = any(msg in message_lower for msg in async_start_messages)
+                    
+                    # 如果检测到异步启动消息，但 n8n_response 中有其他数据，可能包含处理结果
+                    # 检查 n8n_response 是否有除了 message 之外的其他字段
+                    has_additional_data = False
+                    if isinstance(n8n_response, dict) and len(n8n_response) > 1:
+                        # 如果有多个字段，可能有处理结果
+                        has_additional_data = True
+                    
+                    # 如果 n8n_response 中包含有效的处理结果消息，使用它
+                    if message_from_response and not is_async_start:
+                        final_message = str(message_from_response)
+                    # 如果检测到异步启动消息，但有其他数据，尝试格式化显示
+                    elif is_async_start and has_additional_data:
                         try:
+                            # 移除 message 字段，显示其他数据
+                            display_data = {k: v for k, v in n8n_response.items() if k != "message"}
+                            if display_data:
+                                final_message = f"工作流处理完成。结果：\n{json.dumps(display_data, ensure_ascii=False, indent=2)}"
+                            else:
+                                final_message = "工作流已启动，正在处理中，请稍候..."
+                        except:
                             final_message = f"工作流处理完成。结果：\n{json.dumps(n8n_response, ensure_ascii=False, indent=2)}"
+                    # 如果 result_data 中包含 message 字段且不是异步启动消息，使用它
+                    elif "message" in result_data and not is_async_start:
+                        result_message = str(result_data["message"]).lower()
+                        if not any(msg in result_message for msg in async_start_messages):
+                            final_message = result_data["message"]
+                        else:
+                            final_message = "工作流已启动，正在处理中，请稍候..."
+                    # 如果有 n8n_response 数据且不是异步启动消息，尝试格式化
+                    elif n8n_response and not is_async_start:
+                        try:
+                            # 如果是字典，尝试提取有意义的信息
+                            if isinstance(n8n_response, dict):
+                                # 尝试提取结果或数据
+                                result_content = n8n_response.get("result") or n8n_response.get("data") or n8n_response
+                                final_message = f"工作流处理完成。结果：\n{json.dumps(result_content, ensure_ascii=False, indent=2)}"
+                            else:
+                                final_message = f"工作流处理完成。结果：{str(n8n_response)}"
                         except:
                             final_message = f"工作流处理完成。结果：{str(n8n_response)}"
+                    # 如果是异步启动消息且没有其他数据，显示等待提示
+                    elif is_async_start:
+                        final_message = "工作流已启动，正在处理中，请稍候..."
                     else:
                         # 默认消息
                         final_message = "已成功触发合同处理工作流，系统正在后台处理您的合同文件。处理完成后，您将收到处理结果。"
