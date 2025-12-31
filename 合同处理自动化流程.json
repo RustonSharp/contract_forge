@@ -1,0 +1,340 @@
+{
+  "name": "合同处理自动化流程",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contract-processing-webhook",
+        "options": {}
+      },
+      "id": "c98b9692-ffbd-4323-876a-d52a4c0e3e6b",
+      "name": "Webhook - 合同处理触发",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -6688,
+        480
+      ],
+      "webhookId": "contract-processing-webhook",
+      "httpMethod": "POST",
+      "path": "contract-process",
+      "responseMode": "responseNode",
+      "options": {}
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8000/api/tools/execute",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"tool_name\": \"document_parser\",\n  \"parameters\": {\n    \"file_path\": \"{{ $('Webhook - 合同处理触发').item.json.body.file_path }}\"\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "f3f70edd-e269-432b-97ce-b3a4537f43ce",
+      "name": "步骤1: 文档解析",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -6288,
+        480
+      ],
+      "notes": "调用文档解析工具，提取合同文本"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8000/api/tools/execute",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"tool_name\": \"risk_assessment\",\n  \"parameters\": {\n    \"contract_text\": $('步骤1: 文档解析').item.json.body.data.text_content,\n    \"file_path\": $('步骤1: 文档解析').item.json.body.data.file_path,\n    \"risk_types\": [\"legal\", \"financial\"]\n  }\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "fffa7533-7e01-42dd-89d4-db5b26a60a8e",
+      "name": "步骤2: 风险评估",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -5888,
+        480
+      ],
+      "notes": "调用风险评估工具，分析合同风险"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.data.overall_risk_level }}",
+                    "rightValue": "low",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "6bab7ed6-522b-4ea0-b78e-f0eddb69d2de"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "c14d2786-2377-4d16-a4e8-a90ae0eacdeb",
+                    "leftValue": "={{ $json.body.data.overall_risk_level }}",
+                    "rightValue": "high",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5e466beb-75e0-41ea-a525-04c6d7dca1f9",
+      "name": "风险等级判断",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -5488,
+        480
+      ],
+      "notes": "根据风险等级进行分支处理"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8000/api/contracts/auto-approve",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"file_path\": \"{{ $('Webhook - 合同处理触发').item.json.body.file_path }}\",\n  \"risk_level\": \"{{ $('步骤2: 风险评估').item.json.body.data.overall_risk_level }}\",\n  \"assessment_result\": {{ $('步骤2: 风险评估').item.json.body.data }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "d1bd74a6-e899-4c9b-ba15-87caeecda5ea",
+      "name": "低/中风险: 自动审批",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -4880,
+        224
+      ],
+      "notes": "低风险或中风险合同，调用自动审批API"
+    },
+    {
+      "parameters": {
+        "fromEmail": "qyq799660872@163.com",
+        "toEmail": "lib.dio.ma@gmail.com",
+        "subject": "=高风险合同需要人工审核 - 文件: {{ $('Webhook - 合同处理触发').item.json.body.file_path }}",
+        "html": "={{ $json.html_content }}",
+        "options": {}
+      },
+      "id": "8f9539b9-cba0-4afc-836a-4c2a0ffb4a10",
+      "name": "高风险: 邮件通知法务",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -4672,
+        576
+      ],
+      "webhookId": "57b072b0-fade-4620-9bce-94f5be43bb1f",
+      "credentials": {
+        "smtp": {
+          "id": "ZvWkFw64srkfy2v5",
+          "name": "SMTP account"
+        }
+      },
+      "notes": "高风险合同，发送邮件通知法务团队"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/llm/convert_risk_to_html",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -5088,
+        608
+      ],
+      "id": "6a8cbdf1-5f5d-4232-b299-3a9eb3868f85",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/workflow/status/update",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"workflow_id\": $('Webhook - 合同处理触发').item.json.body.workflow_id, \"status\": \"completed\", \"message\": \"合同处理流程已结束，低风险合同，触发自动处理流程\", \"result\": { \"file_path\": $('步骤2: 风险评估').item.json.body.data.file_path, \"risk_level\": $('步骤2: 风险评估').item.json.body.data.overall_risk_level } } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -4400,
+        368
+      ],
+      "id": "9bf65441-3f00-477b-8d44-e7a237fd879e",
+      "name": "更新工作流状态 - 低/中风险"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/workflow/status/update",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"workflow_id\": $('Webhook - 合同处理触发').item.json.body.workflow_id, \"status\": \"completed\", \"message\": \"合同处理流程已结束，高风险合同，已通过邮件发送到法务团队审批\", \"result\": { \"file_path\": ($('HTTP Request').item.json.file_path || $('步骤2: 风险评估').item.json.body.data.file_path), \"risk_level\": $('步骤2: 风险评估').item.json.body.data.overall_risk_level } } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -4400,
+        576
+      ],
+      "id": "ec410eab-581e-420f-9444-d0444412a772",
+      "name": "更新工作流状态 - 高风险"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - 合同处理触发": {
+      "main": [
+        [
+          {
+            "node": "步骤1: 文档解析",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "步骤1: 文档解析": {
+      "main": [
+        [
+          {
+            "node": "步骤2: 风险评估",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "步骤2: 风险评估": {
+      "main": [
+        [
+          {
+            "node": "风险等级判断",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "风险等级判断": {
+      "main": [
+        [
+          {
+            "node": "低/中风险: 自动审批",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "低/中风险: 自动审批": {
+      "main": [
+        [
+          {
+            "node": "更新工作流状态 - 低/中风险",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "高风险: 邮件通知法务": {
+      "main": [
+        [
+          {
+            "node": "更新工作流状态 - 高风险",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "高风险: 邮件通知法务",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "88220e7c-3e3f-4384-9d02-c3e85a2f2c81",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1b896727c204de6af5351095bc9bd64904a683b5008d9bbdbc11a5c26f7f14a2"
+  },
+  "id": "cErnRmiS4HJISTp0",
+  "tags": []
+}
