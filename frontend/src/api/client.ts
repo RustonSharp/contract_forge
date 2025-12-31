@@ -98,9 +98,21 @@ export const contractApi = {
 
   // ========== LLM 对话接口 ==========
   
-  // 与 LLM 对话（支持工具调用）
+  // 与 LLM 对话（支持工具调用，智能查找文件）
   chat: async (messages: ChatMessage[], temperature?: number, maxTokens?: number) => {
     const response = await api.post("/llm/chat", {
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+      enable_tools: true,
+    });
+    return response.data as ChatResponse;
+  },
+
+  // 与 LLM 对话（指定文件路径，直接使用文件）
+  chatWithFileName: async (filePath: string, messages: ChatMessage[], temperature?: number, maxTokens?: number) => {
+    const response = await api.post("/llm/chat_with_file_name", {
+      file_path: filePath,
       messages,
       temperature,
       max_tokens: maxTokens,

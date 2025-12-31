@@ -5,7 +5,7 @@ LLM 对话服务层
 
 import json
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime, timedelta
 from backend.utils.llm import get_llm_client, ChatMessage
 from backend.service.tools.registry import get_registry
@@ -212,12 +212,19 @@ class LLMChatService:
 请根据用户的需求，智能地选择和使用合适的工具。记住：当用户要求处理文件但没有指定具体工具时，优先使用 n8n_workflow_trigger！
 """
     
-    def _extract_file_name_from_messages(self, messages: List[Dict[str, str]]) -> Optional[str]:
+    def _extract_file_name_from_messages(self, messages: Union[List[Dict[str, str]], List[ChatMessage]]) -> Optional[str]:
         """从消息历史中提取文件名"""
         # 从最近的用户消息中查找文件名
         for msg in reversed(messages):
-            if msg.get("role") == "user":
+            # 处理 ChatMessage 对象或字典
+            if isinstance(msg, ChatMessage):
+                role = msg.role
+                content = msg.content
+            else:
+                role = msg.get("role")
                 content = msg.get("content", "")
+            
+            if role == "user":
                 # 匹配文件名模式（包含扩展名）
                 file_patterns = [
                     r'([^\s，,。\n]+\.(?:pdf|docx?|jpg|jpeg|png|bmp|tiff?))',
@@ -342,8 +349,56 @@ class LLMChatService:
         else:
             return "unknown"
     
-    def _extract_tool_call(self, text: str, messages: List[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
-        """从 LLM 响应中提取工具调用"""
+    def _extract_tool_call(self, text: str, messages: Union[List[Dict[str, str]], List[ChatMessage], None] = None, file_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """从 LLM 响应中提取工具调用
+        
+        Args:
+            text: LLM 响应文本
+            messages: 消息历史
+            file_path: 指定的文件路径（如果提供，优先使用）
+        """
+        # 首先检查是否是通用处理请求，如果是且提供了文件路径，强制使用 n8n_workflow_trigger
+        if file_path and messages:
+            # 获取最后一条用户消息
+            last_user_message = None
+            for msg in reversed(messages):
+                if isinstance(msg, ChatMessage):
+                    if msg.role == "user":
+                        last_user_message = msg.content
+                        break
+                elif isinstance(msg, dict):
+                    if msg.get("role") == "user":
+                        last_user_message = msg.get("content", "")
+                        break
+            
+            if last_user_message:
+                # 检测通用处理请求的关键词
+                generic_processing_keywords = [
+                    "处理一下", "处理", "处理文件", "处理合同",
+                    "分析一下", "分析", "分析合同", "分析文件",
+                    "审核一下", "审核", "审核合同", "审核文件",
+                    "帮我处理", "帮我分析", "帮我审核",
+                    "处理这个", "分析这个", "审核这个"
+                ]
+                
+                # 检查是否包含通用处理关键词
+                is_generic_request = any(keyword in last_user_message for keyword in generic_processing_keywords)
+                
+                # 如果没有明确指定具体任务（如"风险评估"、"合规校验"、"解析"等），则认为是通用请求
+                specific_task_keywords = ["风险评估", "合规校验", "合规检查", "解析", "提取文本", "OCR", "识别", "查询", "搜索"]
+                has_specific_task = any(keyword in last_user_message for keyword in specific_task_keywords)
+                
+                if is_generic_request and not has_specific_task:
+                    # 强制使用 n8n_workflow_trigger
+                    file_name_from_path = file_path.split('/')[-1]
+                    logger.info(f"检测到通用处理请求，强制使用 n8n_workflow_trigger，文件: {file_name_from_path}")
+                    return {
+                        "tool_name": "n8n_workflow_trigger",
+                        "parameters": {
+                            "file_name": file_name_from_path
+                        }
+                    }
+        
         # 尝试提取 JSON 格式的工具调用
         json_patterns = [
             r'```json\s*(\{.*?\})\s*```',  # ```json {...} ```
@@ -357,28 +412,55 @@ class LLMChatService:
                 try:
                     tool_call = json.loads(match.group(1))
                     if "tool_name" in tool_call:
-                        # 如果工具调用中缺少文件名，尝试从消息中提取
+                        # 如果工具调用中缺少文件路径，尝试从提供的 file_path 或消息中提取
                         params = tool_call.get("parameters", {})
-                        if messages and not params.get("file_path") and not params.get("image_path") and not params.get("file_name"):
-                            file_name = self._extract_file_name_from_messages(messages)
-                            if file_name:
-                                # 根据文件类型设置正确的参数名
-                                file_type = self._get_file_type(file_name)
-                                if tool_call.get("tool_name") == "ocr_parser" or (tool_call.get("tool_name") == "document_parser" and file_type == "image"):
+                        if not params.get("file_path") and not params.get("image_path") and not params.get("file_name"):
+                            # 优先使用提供的 file_path
+                            file_path_to_use = file_path
+                            if file_path_to_use:
+                                # 从 file_path 中提取文件名（用于 n8n_workflow_trigger）
+                                file_name_from_path = file_path_to_use.split('/')[-1]
+                                file_type = self._get_file_type(file_name_from_path)
+                                
+                                tool_name = tool_call.get("tool_name")
+                                if tool_name == "ocr_parser" or (tool_name == "document_parser" and file_type == "image"):
                                     # 如果应该是OCR但工具名不对，或者文件是图片但用了文档解析工具，需要修正
                                     if file_type == "image":
                                         tool_call["tool_name"] = "ocr_parser"
-                                        params["image_path"] = file_name
+                                        params["image_path"] = file_path_to_use
                                     elif file_type == "document":
                                         tool_call["tool_name"] = "document_parser"
-                                        params["file_path"] = file_name
-                                elif tool_call.get("tool_name") == "document_parser":
-                                    params["file_path"] = file_name
-                                elif tool_call.get("tool_name") == "ocr_parser":
-                                    params["image_path"] = file_name
-                                elif tool_call.get("tool_name") == "n8n_workflow_trigger":
-                                    params["file_name"] = file_name
+                                        params["file_path"] = file_path_to_use
+                                elif tool_name == "document_parser":
+                                    params["file_path"] = file_path_to_use
+                                elif tool_name == "ocr_parser":
+                                    params["image_path"] = file_path_to_use
+                                elif tool_name == "n8n_workflow_trigger":
+                                    # n8n_workflow_trigger 使用 file_name 参数，从 file_path 中提取文件名
+                                    params["file_name"] = file_name_from_path
                                 tool_call["parameters"] = params
+                            elif messages:
+                                # 如果没有提供 file_path，尝试从消息中提取
+                                file_name = self._extract_file_name_from_messages(messages)
+                                if file_name:
+                                    # 根据文件类型设置正确的参数名
+                                    file_type = self._get_file_type(file_name)
+                                    tool_name = tool_call.get("tool_name")
+                                    if tool_name == "ocr_parser" or (tool_name == "document_parser" and file_type == "image"):
+                                        # 如果应该是OCR但工具名不对，或者文件是图片但用了文档解析工具，需要修正
+                                        if file_type == "image":
+                                            tool_call["tool_name"] = "ocr_parser"
+                                            params["image_path"] = file_name
+                                        elif file_type == "document":
+                                            tool_call["tool_name"] = "document_parser"
+                                            params["file_path"] = file_name
+                                    elif tool_name == "document_parser":
+                                        params["file_path"] = file_name
+                                    elif tool_name == "ocr_parser":
+                                        params["image_path"] = file_name
+                                    elif tool_name == "n8n_workflow_trigger":
+                                        params["file_name"] = file_name
+                                    tool_call["parameters"] = params
                         return tool_call
                 except json.JSONDecodeError:
                     continue
@@ -386,26 +468,43 @@ class LLMChatService:
         # 尝试从文本中提取工具名称和参数
         # 特别处理"解析"任务 - 根据文件类型自动选择工具
         if "解析" in text or "提取文本" in text or "识别" in text:
-            # 提取文件名
-            file_name = None
-            file_match = re.search(r'([^\s，,。\n]+\.(?:pdf|docx?|jpg|jpeg|png|bmp|tiff?))', text, re.IGNORECASE)
-            if file_match:
-                file_name = file_match.group(1).strip()
-            elif messages:
-                file_name = self._extract_file_name_from_messages(messages)
-            
-            if file_name:
-                file_type = self._get_file_type(file_name)
+            # 优先使用提供的 file_path，否则从文本或消息中提取
+            file_path_to_use = file_path
+            if file_path_to_use:
+                # 从 file_path 中提取文件名用于判断类型
+                file_name_from_path = file_path_to_use.split('/')[-1]
+                file_type = self._get_file_type(file_name_from_path)
                 if file_type == "image":
                     return {
                         "tool_name": "ocr_parser",
-                        "parameters": {"image_path": file_name}
+                        "parameters": {"image_path": file_path_to_use}
                     }
                 elif file_type == "document":
                     return {
                         "tool_name": "document_parser",
-                        "parameters": {"file_path": file_name}
+                        "parameters": {"file_path": file_path_to_use}
                     }
+            else:
+                # 提取文件名
+                file_name = None
+                file_match = re.search(r'([^\s，,。\n]+\.(?:pdf|docx?|jpg|jpeg|png|bmp|tiff?))', text, re.IGNORECASE)
+                if file_match:
+                    file_name = file_match.group(1).strip()
+                elif messages:
+                    file_name = self._extract_file_name_from_messages(messages)
+                
+                if file_name:
+                    file_type = self._get_file_type(file_name)
+                    if file_type == "image":
+                        return {
+                            "tool_name": "ocr_parser",
+                            "parameters": {"image_path": file_name}
+                        }
+                    elif file_type == "document":
+                        return {
+                            "tool_name": "document_parser",
+                            "parameters": {"file_path": file_name}
+                        }
         
         # 检查是否提到了工具名称
         for tool_name in self.registry.list_tool_names():
@@ -413,43 +512,62 @@ class LLMChatService:
             if tool and (tool.info.display_name in text or tool_name in text):
                 # 尝试提取参数
                 params = {}
-                # 提取文件名（常见参数）
-                file_match = re.search(r'(?:文件|合同|图片)[名名]*[：:]\s*([^\s，,。\n]+\.(?:pdf|docx?|jpg|jpeg|png|bmp|tiff?))', text, re.IGNORECASE)
-                if not file_match:
-                    # 尝试从消息中提取
-                    if messages:
-                        file_name = self._extract_file_name_from_messages(messages)
-                        if file_name:
-                            file_type = self._get_file_type(file_name)
-                            # 根据文件类型和工具类型设置参数
-                            if tool_name == "ocr_parser":
-                                params["image_path"] = file_name
-                            elif tool_name == "document_parser":
-                                # 如果文件是图片但用户要求文档解析，应该用OCR
-                                if file_type == "image":
-                                    return {
-                                        "tool_name": "ocr_parser",
-                                        "parameters": {"image_path": file_name}
-                                    }
-                                params["file_path"] = file_name
-                            elif tool_name == "n8n_workflow_trigger":
-                                params["file_name"] = file_name
-                else:
-                    file_name = file_match.group(1).strip()
-                    file_type = self._get_file_type(file_name)
+                # 优先使用提供的 file_path
+                if file_path:
+                    file_name_from_path = file_path.split('/')[-1]
+                    file_type = self._get_file_type(file_name_from_path)
                     # 根据文件类型和工具类型设置参数
                     if tool_name == "ocr_parser":
-                        params["image_path"] = file_name
+                        params["image_path"] = file_path
                     elif tool_name == "document_parser":
                         # 如果文件是图片但用户要求文档解析，应该用OCR
                         if file_type == "image":
                             return {
                                 "tool_name": "ocr_parser",
-                                "parameters": {"image_path": file_name}
+                                "parameters": {"image_path": file_path}
                             }
-                        params["file_path"] = file_name
+                        params["file_path"] = file_path
                     elif tool_name == "n8n_workflow_trigger":
-                        params["file_name"] = file_name
+                        # n8n_workflow_trigger 使用 file_name 参数，从 file_path 中提取文件名
+                        params["file_name"] = file_name_from_path
+                else:
+                    # 提取文件名（常见参数）
+                    file_match = re.search(r'(?:文件|合同|图片)[名名]*[：:]\s*([^\s，,。\n]+\.(?:pdf|docx?|jpg|jpeg|png|bmp|tiff?))', text, re.IGNORECASE)
+                    if not file_match:
+                        # 尝试从消息中提取
+                        if messages:
+                            file_name = self._extract_file_name_from_messages(messages)
+                            if file_name:
+                                file_type = self._get_file_type(file_name)
+                                # 根据文件类型和工具类型设置参数
+                                if tool_name == "ocr_parser":
+                                    params["image_path"] = file_name
+                                elif tool_name == "document_parser":
+                                    # 如果文件是图片但用户要求文档解析，应该用OCR
+                                    if file_type == "image":
+                                        return {
+                                            "tool_name": "ocr_parser",
+                                            "parameters": {"image_path": file_name}
+                                        }
+                                    params["file_path"] = file_name
+                                elif tool_name == "n8n_workflow_trigger":
+                                    params["file_name"] = file_name
+                    else:
+                        file_name = file_match.group(1).strip()
+                        file_type = self._get_file_type(file_name)
+                        # 根据文件类型和工具类型设置参数
+                        if tool_name == "ocr_parser":
+                            params["image_path"] = file_name
+                        elif tool_name == "document_parser":
+                            # 如果文件是图片但用户要求文档解析，应该用OCR
+                            if file_type == "image":
+                                return {
+                                    "tool_name": "ocr_parser",
+                                    "parameters": {"image_path": file_name}
+                                }
+                            params["file_path"] = file_name
+                        elif tool_name == "n8n_workflow_trigger":
+                            params["file_name"] = file_name
                 
                 if params or tool_name == "n8n_workflow_trigger":
                     return {
@@ -491,7 +609,9 @@ class LLMChatService:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         enable_tools: bool = True,
-        max_iterations: int = 3
+        max_iterations: int = 3,
+        file_name: Optional[str] = None,
+        file_path: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         与 LLM 对话，支持工具调用
@@ -502,19 +622,72 @@ class LLMChatService:
             max_tokens: 最大 token 数
             enable_tools: 是否启用工具调用
             max_iterations: 最大迭代次数（工具调用链）
+            file_name: 指定的文件名（已弃用，请使用 file_path，如果提供，直接查找该文件，不进行智能查找）
+            file_path: 指定的文件路径（相对于 uploads 目录，如 "2025-12-29/test_contract.pdf"，优先使用）
         
         Returns:
             包含 message, tool_calls, usage 的字典
         """
-        # 检查用户消息中是否提到文件但没有明确文件名
+        # 如果提供了 file_path，直接使用（不需要查找）
+        # 如果只提供了 file_name（向后兼容），则查找文件获取 file_path
+        file_path_to_use = file_path
+        file_name_for_display = None
+        
+        if file_path_to_use:
+            # 直接使用提供的 file_path，从路径中提取文件名用于显示
+            file_name_for_display = file_path_to_use.split('/')[-1]
+        elif file_name:
+            # 向后兼容：如果只提供了 file_name，查找文件获取 file_path
+            try:
+                file_info = await self.file_service.get_file_info(file_name)
+                if not file_info:
+                    return {
+                        "message": f"未找到文件 '{file_name}'。请检查文件名是否正确。",
+                        "tool_calls": None,
+                        "usage": None
+                    }
+                file_path_to_use = file_info.file_path
+                file_name_for_display = file_info.file_name
+            except Exception as e:
+                logger.error(f"查找文件失败: {str(e)}", exc_info=True)
+                return {
+                    "message": f"查找文件时发生错误: {str(e)}",
+                    "tool_calls": None,
+                    "usage": None
+                }
+        
+        # 如果提供了文件路径，在最后一条用户消息中添加文件信息
+        if file_path_to_use and file_name_for_display:
+            try:
+                # 在最后一条用户消息中添加文件信息
+                last_user_message = None
+                for msg in reversed(messages):
+                    if msg.get("role") == "user":
+                        last_user_message = msg.get("content", "")
+                        break
+                
+                if last_user_message:
+                    # 修改最后一条消息，添加文件信息
+                    messages = messages.copy()
+                    for i in range(len(messages) - 1, -1, -1):
+                        if messages[i].get("role") == "user":
+                            messages[i] = {
+                                "role": "user",
+                                "content": f"{last_user_message}\n\n[系统提示：已指定文件 {file_name_for_display}，将使用此文件进行处理]"
+                            }
+                            break
+            except Exception as e:
+                logger.error(f"添加文件信息到消息失败: {str(e)}", exc_info=True)
+        
+        # 检查用户消息中是否提到文件但没有明确文件名（仅在未提供 file_name 时）
         last_user_message = None
         for msg in reversed(messages):
             if msg.get("role") == "user":
                 last_user_message = msg.get("content", "")
                 break
         
-        # 检查是否是确认处理多个文件的回复
-        if last_user_message and enable_tools:
+        # 检查是否是确认处理多个文件的回复（仅在未提供文件路径时）
+        if last_user_message and enable_tools and not file_path_to_use:
             confirmation_keywords = ["是", "全部处理", "全部", "都处理", "yes", "all", "全部执行"]
             is_confirmation = any(keyword in last_user_message for keyword in confirmation_keywords)
             
@@ -544,8 +717,8 @@ class LLMChatService:
                                         last_user_message += f"\n\n[系统提示：将处理 {len(file_names)} 个文件，当前处理第一个：{file_name}]"
                                 break
         
-        # 如果用户提到处理文件但没有明确文件名，尝试查找文件
-        if last_user_message and enable_tools:
+        # 如果用户提到处理文件但没有明确文件名，尝试查找文件（仅在未提供文件路径时）
+        if last_user_message and enable_tools and not file_path_to_use:
             file_keywords = ["处理", "分析", "解析", "审核", "文件", "合同"]
             has_file_keyword = any(keyword in last_user_message for keyword in file_keywords)
             has_explicit_filename = bool(re.search(r'[^\s，,。\n]+\.(?:pdf|docx?|jpg|jpeg|png|bmp|tiff?)', last_user_message, re.IGNORECASE))
@@ -634,8 +807,8 @@ class LLMChatService:
                     }
                 }
             
-            # 尝试提取工具调用（传入消息历史以便提取文件名）
-            tool_call = self._extract_tool_call(assistant_message, chat_messages)
+            # 尝试提取工具调用（传入消息历史和文件路径）
+            tool_call = self._extract_tool_call(assistant_message, chat_messages, file_path=file_path_to_use)
             
             if not tool_call:
                 # 没有工具调用，返回最终答案
@@ -664,7 +837,48 @@ class LLMChatService:
                 "result": tool_result
             })
             
-            # 将工具结果添加到消息中，让 LLM 继续处理
+            # 如果执行的是 n8n_workflow_trigger，这是一个完整的工作流，执行完后应该直接返回
+            if tool_name == "n8n_workflow_trigger":
+                if tool_result["success"]:
+                    # 检查返回数据中是否包含处理结果
+                    result_data = tool_result.get("data", {})
+                    n8n_response = result_data.get("n8n_response", {})
+                    
+                    # 如果 n8n_response 中包含 message 字段，使用它作为最终消息
+                    if isinstance(n8n_response, dict) and "message" in n8n_response:
+                        final_message = n8n_response["message"]
+                    # 如果 n8n_response 本身就是字符串，直接使用
+                    elif isinstance(n8n_response, str):
+                        final_message = n8n_response
+                    # 如果 result_data 中包含 message 字段，使用它
+                    elif "message" in result_data:
+                        final_message = result_data["message"]
+                    # 否则，尝试格式化整个响应数据
+                    elif n8n_response:
+                        try:
+                            final_message = f"工作流处理完成。结果：\n{json.dumps(n8n_response, ensure_ascii=False, indent=2)}"
+                        except:
+                            final_message = f"工作流处理完成。结果：{str(n8n_response)}"
+                    else:
+                        # 默认消息
+                        final_message = "已成功触发合同处理工作流，系统正在后台处理您的合同文件。处理完成后，您将收到处理结果。"
+                else:
+                    # 生成错误消息
+                    error_msg = tool_result.get('error', '未知错误')
+                    final_message = f"触发工作流失败：{error_msg}"
+                
+                # 直接返回，不再继续迭代
+                return {
+                    "message": final_message,
+                    "tool_calls": tool_calls if tool_calls else None,
+                    "usage": {
+                        "prompt_tokens": getattr(response, "prompt_tokens", None),
+                        "completion_tokens": getattr(response, "completion_tokens", None),
+                        "total_tokens": getattr(response, "total_tokens", None)
+                    }
+                }
+            
+            # 将工具结果添加到消息中，让 LLM 继续处理（非 n8n_workflow_trigger 工具）
             if tool_result["success"]:
                 result_text = f"工具 '{tool_name}' 执行成功。结果：\n{json.dumps(tool_result.get('data'), ensure_ascii=False, indent=2)}"
             else:
@@ -677,8 +891,30 @@ class LLMChatService:
             ))
         
         # 达到最大迭代次数，返回最后的消息
+        # 如果最后的消息是 JSON 格式的工具调用（说明工具调用链未完成），生成友好消息
+        final_message = assistant_message
+        if tool_calls and len(tool_calls) > 0:
+            # 检查最后一条消息是否是 JSON 格式的工具调用
+            is_json_tool_call = False
+            try:
+                parsed_json = json.loads(assistant_message.strip())
+                if isinstance(parsed_json, dict) and "tool_name" in parsed_json:
+                    is_json_tool_call = True
+            except (json.JSONDecodeError, ValueError):
+                # 检查是否包含工具调用的 JSON 代码块或模式
+                if ("```json" in assistant_message and "tool_name" in assistant_message) or \
+                   (assistant_message.strip().startswith("{") and "tool_name" in assistant_message and "parameters" in assistant_message):
+                    is_json_tool_call = True
+            
+            if is_json_tool_call:
+                # 获取最后一个工具调用的显示名称
+                last_tool_name = tool_calls[-1].get("tool_name")
+                tool = self.registry.get(last_tool_name)
+                tool_display_name = tool.info.display_name if tool else last_tool_name
+                final_message = f"正在使用 {tool_display_name} 处理您的请求..."
+        
         return {
-            "message": assistant_message,
+            "message": final_message,
             "tool_calls": tool_calls if tool_calls else None,
             "usage": {
                 "prompt_tokens": getattr(response, "prompt_tokens", None),
@@ -686,4 +922,151 @@ class LLMChatService:
                 "total_tokens": getattr(response, "total_tokens", None)
             }
         }
+    
+    async def convert_risk_to_html(self, risk_data: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
+        """
+        将风险判断结果转换为 HTML 格式，用于邮件发送
+        
+        Args:
+            risk_data: 风险判断结果数据，支持多种格式：
+                1. 直接发送 data 对象: {"success": true, "data": {...}}
+                2. 包含 body 的对象: {"body": {"success": true, "data": {...}}}
+                3. 数组格式: [{"body": {"success": true, "data": {...}}}]
+        
+        Returns:
+            str: HTML 格式的邮件正文
+        """
+        try:
+            # 提取实际的风险数据，支持多种数据格式
+            actual_data = None
+            
+            # 如果是列表格式
+            if isinstance(risk_data, list):
+                if len(risk_data) > 0:
+                    first_item = risk_data[0]
+                    # 检查是否包含 body 键
+                    if "body" in first_item:
+                        body = first_item["body"]
+                        if isinstance(body, dict) and body.get("success") and body.get("data"):
+                            actual_data = body["data"]
+                    # 如果没有 body，直接检查是否有 data
+                    elif "data" in first_item:
+                        actual_data = first_item["data"]
+                    # 如果第一个元素本身就是数据对象
+                    elif "risks" in first_item or "overall_risk_level" in first_item:
+                        actual_data = first_item
+            # 如果是字典格式
+            elif isinstance(risk_data, dict):
+                # 格式1: 直接包含 data: {"success": true, "data": {...}}
+                if "data" in risk_data and "success" in risk_data:
+                    if risk_data.get("success") and risk_data.get("data"):
+                        actual_data = risk_data["data"]
+                # 格式2: 包含 body: {"body": {"success": true, "data": {...}}}
+                elif "body" in risk_data:
+                    body = risk_data["body"]
+                    if isinstance(body, dict) and body.get("success") and body.get("data"):
+                        actual_data = body["data"]
+                # 格式3: 直接就是数据对象: {"overall_risk_level": "high", "risks": [...]}
+                elif "risks" in risk_data or "overall_risk_level" in risk_data:
+                    actual_data = risk_data
+            
+            if not actual_data:
+                logger.warning(f"未能从输入数据中提取风险数据，输入数据类型: {type(risk_data)}, 内容: {str(risk_data)[:200]}")
+                return """<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>错误</title>
+</head>
+<body>
+    <p>未找到有效的风险数据。请检查数据格式是否正确。</p>
+</body>
+</html>"""
+            
+            # 构建系统提示词
+            system_prompt = """你是一个专业的合同风险分析报告生成助手。你的任务是将风险评估的 JSON 数据转换为格式良好、专业的 HTML 邮件正文。
+
+要求：
+1. 生成完整的 HTML 文档结构（包含 <!DOCTYPE html>, <html>, <head>, <body> 标签）
+2. 使用内联 CSS 样式，确保邮件客户端能够正确显示
+3. 样式要专业、简洁、易读，适合商务邮件
+4. 风险等级要用不同颜色标识（高风险-红色，中风险-橙色，低风险-黄色）
+5. 结构清晰，包含：
+   - 标题：合同风险评估报告
+   - 总体风险等级（高/中/低）
+   - 风险分析统计
+   - 详细风险列表（按风险类型分组）
+   - 每个风险包含：风险类型、严重程度、描述、问题条款、建议
+6. 使用表格或列表展示，排版整齐
+7. 颜色使用十六进制代码（如 #FF0000 表示红色）
+8. 字体大小适中，适合邮件阅读
+9. 不要包含任何 JavaScript 代码
+10. HTML 代码要完整，可以直接作为邮件正文使用
+
+请直接返回 HTML 代码，不要添加任何其他说明文字。"""
+            
+            # 构建用户提示词
+            user_prompt = f"""请将以下风险评估数据转换为 HTML 格式的邮件正文：
+
+{json.dumps(actual_data, ensure_ascii=False, indent=2)}
+
+请生成完整的 HTML 代码。"""
+            
+            # 调用 LLM 生成 HTML
+            messages = [
+                ChatMessage(role="system", content=system_prompt),
+                ChatMessage(role="user", content=user_prompt)
+            ]
+            
+            response = await self.llm_client.chat(
+                messages=messages,
+                temperature=0.3,  # 使用较低的温度以获得更稳定的输出
+                max_tokens=4000  # 设置较大的 token 限制以容纳完整的 HTML
+            )
+            
+            html_content = response.content.strip()
+            
+            # 如果 LLM 返回的内容包含代码块标记，尝试提取 HTML
+            if "```html" in html_content:
+                # 提取 ```html 和 ``` 之间的内容
+                match = re.search(r'```html\s*(.*?)\s*```', html_content, re.DOTALL)
+                if match:
+                    html_content = match.group(1).strip()
+            elif "```" in html_content:
+                # 如果没有 html 标记，尝试提取第一个代码块
+                match = re.search(r'```\s*(.*?)\s*```', html_content, re.DOTALL)
+                if match:
+                    html_content = match.group(1).strip()
+            
+            # 验证是否是有效的 HTML（至少包含 <html> 或 <body> 标签）
+            if "<html" not in html_content and "<body" not in html_content:
+                # 如果没有完整的 HTML 结构，包装在基本结构中
+                html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>合同风险评估报告</title>
+</head>
+<body>
+{html_content}
+</body>
+</html>"""
+            
+            logger.info("风险数据已成功转换为 HTML 格式")
+            return html_content
+        
+        except Exception as e:
+            logger.error(f"转换风险数据为 HTML 失败: {str(e)}", exc_info=True)
+            # 返回一个简单的错误 HTML
+            return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>错误</title>
+</head>
+<body>
+    <p style="color: red;">转换失败: {str(e)}</p>
+</body>
+</html>"""
 
