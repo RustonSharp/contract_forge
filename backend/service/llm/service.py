@@ -16,6 +16,42 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _convert_to_relative_path(file_path: str, uploads_dir: str = "./uploads") -> str:
+    """
+    将文件路径转换为相对路径（相对于 uploads 目录）
+    
+    Args:
+        file_path: 文件路径（可以是绝对路径、相对路径或文件名）
+        uploads_dir: uploads 目录路径，默认为 "./uploads"
+    
+    Returns:
+        相对路径（如 "2025-12-29/test_contract.pdf"），如果无法转换则返回原始路径
+    """
+    from pathlib import Path
+    import os
+    
+    # 如果是相对路径且包含路径分隔符，直接返回（已经 relative to uploads）
+    if "/" in file_path or "\\" in file_path:
+        # 检查是否是相对于 uploads 目录的路径
+        uploads_path = Path(uploads_dir).resolve()
+        file_path_obj = Path(file_path)
+        
+        # 如果是绝对路径，尝试转换为相对路径
+        if file_path_obj.is_absolute():
+            try:
+                relative = file_path_obj.relative_to(uploads_path)
+                return str(relative).replace("\\", "/")
+            except ValueError:
+                # 不在 uploads 目录下，返回原始路径
+                pass
+        
+        # 如果不是绝对路径，可能是相对于 uploads 的路径，直接返回
+        return file_path.replace("\\", "/")
+    
+    # 如果只是文件名，返回文件名（让调用者处理）
+    return file_path
+
+
 class LLMChatService:
     """LLM 对话服务，支持工具调用"""
     
@@ -390,12 +426,13 @@ class LLMChatService:
                 
                 if is_generic_request and not has_specific_task:
                     # 强制使用 n8n_workflow_trigger
-                    file_name_from_path = file_path.split('/')[-1]
-                    logger.info(f"检测到通用处理请求，强制使用 n8n_workflow_trigger，文件: {file_name_from_path}")
+                    # 将 file_path 转换为相对路径（相对于 uploads 目录）
+                    relative_path = _convert_to_relative_path(file_path)
+                    logger.info(f"检测到通用处理请求，强制使用 n8n_workflow_trigger，文件: {relative_path}")
                     return {
                         "tool_name": "n8n_workflow_trigger",
                         "parameters": {
-                            "file_name": file_name_from_path
+                            "file_path": relative_path
                         }
                     }
         
@@ -436,8 +473,9 @@ class LLMChatService:
                                 elif tool_name == "ocr_parser":
                                     params["image_path"] = file_path_to_use
                                 elif tool_name == "n8n_workflow_trigger":
-                                    # n8n_workflow_trigger 使用 file_name 参数，从 file_path 中提取文件名
-                                    params["file_name"] = file_name_from_path
+                                    # n8n_workflow_trigger 使用 file_path 参数（相对路径）
+                                    relative_path = _convert_to_relative_path(file_path_to_use)
+                                    params["file_path"] = relative_path
                                 tool_call["parameters"] = params
                             elif messages:
                                 # 如果没有提供 file_path，尝试从消息中提取
@@ -459,7 +497,9 @@ class LLMChatService:
                                     elif tool_name == "ocr_parser":
                                         params["image_path"] = file_name
                                     elif tool_name == "n8n_workflow_trigger":
-                                        params["file_name"] = file_name
+                                        # 向后兼容：如果只是文件名，尝试转换为相对路径
+                                        relative_path = _convert_to_relative_path(file_name)
+                                        params["file_path"] = relative_path
                                     tool_call["parameters"] = params
                         return tool_call
                 except json.JSONDecodeError:
@@ -528,8 +568,9 @@ class LLMChatService:
                             }
                         params["file_path"] = file_path
                     elif tool_name == "n8n_workflow_trigger":
-                        # n8n_workflow_trigger 使用 file_name 参数，从 file_path 中提取文件名
-                        params["file_name"] = file_name_from_path
+                        # n8n_workflow_trigger 使用 file_path 参数（相对路径）
+                        relative_path = _convert_to_relative_path(file_path)
+                        params["file_path"] = relative_path
                 else:
                     # 提取文件名（常见参数）
                     file_match = re.search(r'(?:文件|合同|图片)[名名]*[：:]\s*([^\s，,。\n]+\.(?:pdf|docx?|jpg|jpeg|png|bmp|tiff?))', text, re.IGNORECASE)
@@ -551,7 +592,9 @@ class LLMChatService:
                                         }
                                     params["file_path"] = file_name
                                 elif tool_name == "n8n_workflow_trigger":
-                                    params["file_name"] = file_name
+                                    # 向后兼容：如果只是文件名，尝试转换为相对路径
+                                    relative_path = _convert_to_relative_path(file_name)
+                                    params["file_path"] = relative_path
                     else:
                         file_name = file_match.group(1).strip()
                         file_type = self._get_file_type(file_name)
@@ -567,7 +610,9 @@ class LLMChatService:
                                 }
                             params["file_path"] = file_name
                         elif tool_name == "n8n_workflow_trigger":
-                            params["file_name"] = file_name
+                            # 向后兼容：如果只是文件名，尝试转换为相对路径
+                            relative_path = _convert_to_relative_path(file_name)
+                            params["file_path"] = relative_path
                 
                 if params or tool_name == "n8n_workflow_trigger":
                     return {
@@ -837,87 +882,28 @@ class LLMChatService:
                 "result": tool_result
             })
             
-            # 如果执行的是 n8n_workflow_trigger，这是一个完整的工作流，执行完后应该直接返回
+            # 如果执行的是 n8n_workflow_trigger，返回 workflow_id 供前端轮询
             if tool_name == "n8n_workflow_trigger":
                 if tool_result["success"]:
-                    # 检查返回数据中是否包含处理结果
+                    # 提取 workflow_id
                     result_data = tool_result.get("data", {})
-                    n8n_response = result_data.get("n8n_response", {})
+                    workflow_id = result_data.get("workflow_id")
                     
-                    # 提取消息内容和处理结果
-                    message_from_response = None
-                    result_content = None
-                    
-                    if isinstance(n8n_response, dict):
-                        # 尝试提取消息
-                        message_from_response = n8n_response.get("message") or n8n_response.get("result") or n8n_response.get("data")
-                        # 尝试提取结果数据（可能在不同的字段中）
-                        result_content = n8n_response.get("result") or n8n_response.get("data") or n8n_response.get("output") or n8n_response
-                    elif isinstance(n8n_response, str):
-                        message_from_response = n8n_response
-                        result_content = n8n_response
-                    
-                    # 检查是否是异步启动消息（工作流已启动但还在处理中）
-                    async_start_messages = ["workflow was started", "workflow started", "工作流已启动", "已启动"]
-                    is_async_start = False
-                    if message_from_response:
-                        message_lower = str(message_from_response).lower()
-                        is_async_start = any(msg in message_lower for msg in async_start_messages)
-                    
-                    # 如果检测到异步启动消息，但 n8n_response 中有其他数据，可能包含处理结果
-                    # 检查 n8n_response 是否有除了 message 之外的其他字段
-                    has_additional_data = False
-                    if isinstance(n8n_response, dict) and len(n8n_response) > 1:
-                        # 如果有多个字段，可能有处理结果
-                        has_additional_data = True
-                    
-                    # 如果 n8n_response 中包含有效的处理结果消息，使用它
-                    if message_from_response and not is_async_start:
-                        final_message = str(message_from_response)
-                    # 如果检测到异步启动消息，但有其他数据，尝试格式化显示
-                    elif is_async_start and has_additional_data:
-                        try:
-                            # 移除 message 字段，显示其他数据
-                            display_data = {k: v for k, v in n8n_response.items() if k != "message"}
-                            if display_data:
-                                final_message = f"工作流处理完成。结果：\n{json.dumps(display_data, ensure_ascii=False, indent=2)}"
-                            else:
-                                final_message = "工作流已启动，正在处理中，请稍候..."
-                        except:
-                            final_message = f"工作流处理完成。结果：\n{json.dumps(n8n_response, ensure_ascii=False, indent=2)}"
-                    # 如果 result_data 中包含 message 字段且不是异步启动消息，使用它
-                    elif "message" in result_data and not is_async_start:
-                        result_message = str(result_data["message"]).lower()
-                        if not any(msg in result_message for msg in async_start_messages):
-                            final_message = result_data["message"]
-                        else:
-                            final_message = "工作流已启动，正在处理中，请稍候..."
-                    # 如果有 n8n_response 数据且不是异步启动消息，尝试格式化
-                    elif n8n_response and not is_async_start:
-                        try:
-                            # 如果是字典，尝试提取有意义的信息
-                            if isinstance(n8n_response, dict):
-                                # 尝试提取结果或数据
-                                result_content = n8n_response.get("result") or n8n_response.get("data") or n8n_response
-                                final_message = f"工作流处理完成。结果：\n{json.dumps(result_content, ensure_ascii=False, indent=2)}"
-                            else:
-                                final_message = f"工作流处理完成。结果：{str(n8n_response)}"
-                        except:
-                            final_message = f"工作流处理完成。结果：{str(n8n_response)}"
-                    # 如果是异步启动消息且没有其他数据，显示等待提示
-                    elif is_async_start:
-                        final_message = "工作流已启动，正在处理中，请稍候..."
+                    # 返回 workflow_id，让前端可以轮询状态
+                    if workflow_id:
+                        final_message = f"工作流已启动，正在处理中。工作流 ID: {workflow_id}。前端将自动轮询状态。"
                     else:
-                        # 默认消息
-                        final_message = "已成功触发合同处理工作流，系统正在后台处理您的合同文件。处理完成后，您将收到处理结果。"
+                        final_message = "工作流已启动，正在处理中。"
                 else:
                     # 生成错误消息
                     error_msg = tool_result.get('error', '未知错误')
                     final_message = f"触发工作流失败：{error_msg}"
+                    workflow_id = None
                 
-                # 直接返回，不再继续迭代
+                # 直接返回，包含 workflow_id
                 return {
                     "message": final_message,
+                    "workflow_id": workflow_id,
                     "tool_calls": tool_calls if tool_calls else None,
                     "usage": {
                         "prompt_tokens": getattr(response, "prompt_tokens", None),
@@ -971,7 +957,7 @@ class LLMChatService:
             }
         }
     
-    async def convert_risk_to_html(self, risk_data: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
+    async def convert_risk_to_html(self, risk_data: Union[List[Dict[str, Any]], Dict[str, Any]]) -> Dict[str, Any]:
         """
         将风险判断结果转换为 HTML 格式，用于邮件发送
         
@@ -982,11 +968,14 @@ class LLMChatService:
                 3. 数组格式: [{"body": {"success": true, "data": {...}}}]
         
         Returns:
-            str: HTML 格式的邮件正文
+            Dict[str, Any]: 包含 html_content 和 file_path 的字典
+                - html_content: HTML 格式的邮件正文
+                - file_path: 文件的相对路径（相对于 uploads 目录）
         """
         try:
             # 提取实际的风险数据，支持多种数据格式
             actual_data = None
+            file_path = None  # 提取文件路径
             
             # 如果是列表格式
             if isinstance(risk_data, list):
@@ -997,30 +986,36 @@ class LLMChatService:
                         body = first_item["body"]
                         if isinstance(body, dict) and body.get("success") and body.get("data"):
                             actual_data = body["data"]
+                            file_path = actual_data.get("file_path") if isinstance(actual_data, dict) else None
                     # 如果没有 body，直接检查是否有 data
                     elif "data" in first_item:
                         actual_data = first_item["data"]
+                        file_path = actual_data.get("file_path") if isinstance(actual_data, dict) else None
                     # 如果第一个元素本身就是数据对象
                     elif "risks" in first_item or "overall_risk_level" in first_item:
                         actual_data = first_item
+                        file_path = actual_data.get("file_path") if isinstance(actual_data, dict) else None
             # 如果是字典格式
             elif isinstance(risk_data, dict):
                 # 格式1: 直接包含 data: {"success": true, "data": {...}}
                 if "data" in risk_data and "success" in risk_data:
                     if risk_data.get("success") and risk_data.get("data"):
                         actual_data = risk_data["data"]
+                        file_path = actual_data.get("file_path") if isinstance(actual_data, dict) else None
                 # 格式2: 包含 body: {"body": {"success": true, "data": {...}}}
                 elif "body" in risk_data:
                     body = risk_data["body"]
                     if isinstance(body, dict) and body.get("success") and body.get("data"):
                         actual_data = body["data"]
+                        file_path = actual_data.get("file_path") if isinstance(actual_data, dict) else None
                 # 格式3: 直接就是数据对象: {"overall_risk_level": "high", "risks": [...]}
                 elif "risks" in risk_data or "overall_risk_level" in risk_data:
                     actual_data = risk_data
+                    file_path = actual_data.get("file_path") if isinstance(actual_data, dict) else None
             
             if not actual_data:
                 logger.warning(f"未能从输入数据中提取风险数据，输入数据类型: {type(risk_data)}, 内容: {str(risk_data)[:200]}")
-                return """<!DOCTYPE html>
+                error_html = """<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -1030,6 +1025,10 @@ class LLMChatService:
     <p>未找到有效的风险数据。请检查数据格式是否正确。</p>
 </body>
 </html>"""
+                return {
+                    "html_content": error_html,
+                    "file_path": file_path
+                }
             
             # 构建系统提示词
             system_prompt = """你是一个专业的合同风险分析报告生成助手。你的任务是将风险评估的 JSON 数据转换为格式良好、专业的 HTML 邮件正文。
@@ -1101,13 +1100,16 @@ class LLMChatService:
 </body>
 </html>"""
             
-            logger.info("风险数据已成功转换为 HTML 格式")
-            return html_content
+            logger.info(f"风险数据已成功转换为 HTML 格式，文件路径: {file_path}")
+            return {
+                "html_content": html_content,
+                "file_path": file_path
+            }
         
         except Exception as e:
             logger.error(f"转换风险数据为 HTML 失败: {str(e)}", exc_info=True)
             # 返回一个简单的错误 HTML
-            return f"""<!DOCTYPE html>
+            error_html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -1117,4 +1119,8 @@ class LLMChatService:
     <p style="color: red;">转换失败: {str(e)}</p>
 </body>
 </html>"""
+            return {
+                "html_content": error_html,
+                "file_path": None
+            }
 

@@ -26,6 +26,7 @@ export interface ChatMessage {
 // LLM 对话响应接口
 export interface ChatResponse {
   message: string;
+  workflow_id?: string;  // 工作流 ID（如果调用了 n8n_workflow_trigger）
   tool_calls?: Array<{
     tool_name: string;
     parameters: Record<string, any>;
@@ -40,6 +41,22 @@ export interface ChatResponse {
     completion_tokens?: number;
     total_tokens?: number;
   };
+}
+
+// 工作流状态响应接口
+export interface WorkflowStatusResponse {
+  workflow_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  file_path?: string;
+  result?: {
+    file_path?: string;
+    risk_level?: string;
+    [key: string]: any;
+  };
+  message?: string;
+  error?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // 工具信息接口
@@ -157,6 +174,14 @@ export const contractApi = {
   listToolNames: async () => {
     const response = await api.get("/tools/names");
     return response.data;
+  },
+
+  // ========== 工作流状态管理接口 ==========
+  
+  // 查询工作流状态
+  getWorkflowStatus: async (workflowId: string) => {
+    const response = await api.get(`/workflow/status/${workflowId}`);
+    return response.data as WorkflowStatusResponse;
   },
 };
 

@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from backend.service.tools.base import BaseTool
 from backend.service.tools.models import ToolInfo, ToolParameter, ToolResult
+from backend.service.workflow.service import get_workflow_status_service, WorkflowStatus
 
 
 # 查找项目根目录并加载 .env
@@ -50,10 +51,16 @@ class N8NWorkflowTriggerTool(BaseTool):
             description="触发 N8N 自动化工作流处理合同文件。当用户没有指定具体工具，只是要求处理文件时，应使用此工具执行完整的自动化流程（包括文档解析、合规校验、风险评估等）",
             parameters=[
                 ToolParameter(
+                    name="file_path",
+                    type="string",
+                    description="合同文件相对路径（相对于 uploads 目录，如 '2025-12-29/test_contract.pdf'）或文件名。程序会在 uploads 目录下自动查找",
+                    required=False
+                ),
+                ToolParameter(
                     name="file_name",
                     type="string",
-                    description="合同文件名（可以是完整文件名或部分文件名，程序会在 uploads 目录下自动查找）",
-                    required=True
+                    description="合同文件名（已弃用，请使用 file_path）。可以是完整文件名或部分文件名，程序会在 uploads 目录下自动查找",
+                    required=False
                 ),
                 ToolParameter(
                     name="workflow_path",
@@ -87,7 +94,20 @@ class N8NWorkflowTriggerTool(BaseTool):
                     execution_time=time.time() - start_time
                 )
             
+            # 优先使用 file_path，如果未提供则使用 file_name（向后兼容）
+            file_path = kwargs.get("file_path")
             file_name = kwargs.get("file_name")
+            
+            # 如果提供了 file_path，使用 file_path；否则使用 file_name
+            if not file_path and file_name:
+                file_path = file_name
+            elif not file_path:
+                return ToolResult(
+                    success=False,
+                    error="file_path 或 file_name 参数必须提供其中一个",
+                    execution_time=time.time() - start_time
+                )
+            
             workflow_path = kwargs.get("workflow_path", "/webhook/contract-process")
             http_method = kwargs.get("http_method", "POST").upper()
             
@@ -112,9 +132,17 @@ class N8NWorkflowTriggerTool(BaseTool):
                     workflow_path = "/" + workflow_path
                 webhook_url = f"{n8n_base_url}{workflow_path}"
             
-            # 准备请求数据（仅传递 file_name）
+            # 创建工作流状态记录
+            workflow_status_service = get_workflow_status_service()
+            workflow_id = workflow_status_service.create_workflow_status(
+                file_path=file_path,
+                initial_status=WorkflowStatus.RUNNING
+            )
+            
+            # 准备请求数据（传递 file_path 和 workflow_id）
             request_data = {
-                "file_name": file_name
+                "file_path": file_path,
+                "workflow_id": workflow_id
             }
             
             # 调用 N8N Webhook
@@ -137,7 +165,8 @@ class N8NWorkflowTriggerTool(BaseTool):
                             # 处理响应
                             if response.status == 200:
                                 result_data = {
-                                    "file_name": file_name,
+                                    "workflow_id": workflow_id,
+                                    "file_path": file_path,
                                     "webhook_url": webhook_url,
                                     "http_method": http_method,
                                     "n8n_response": response_data,
@@ -187,7 +216,8 @@ class N8NWorkflowTriggerTool(BaseTool):
                             # 处理响应
                             if response.status == 200:
                                 result_data = {
-                                    "file_name": file_name,
+                                    "workflow_id": workflow_id,
+                                    "file_path": file_path,
                                     "webhook_url": webhook_url,
                                     "http_method": http_method,
                                     "n8n_response": response_data,

@@ -3,7 +3,7 @@ LLM 对话接口路由
 """
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
@@ -34,6 +34,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """对话响应"""
     message: str
+    workflow_id: Optional[str] = None  # 工作流 ID（如果调用了 n8n_workflow_trigger）
     tool_calls: Optional[List[Dict[str, Any]]] = None
     usage: Optional[Dict[str, Any]] = None
 
@@ -62,6 +63,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         
         return ChatResponse(
             message=response["message"],
+            workflow_id=response.get("workflow_id"),
             tool_calls=response.get("tool_calls"),
             usage=response.get("usage")
         )
@@ -101,6 +103,7 @@ async def chat_with_file_name(request: ChatRequest) -> ChatResponse:
         
         return ChatResponse(
             message=response["message"],
+            workflow_id=response.get("workflow_id"),
             tool_calls=response.get("tool_calls"),
             usage=response.get("usage")
         )
@@ -136,6 +139,7 @@ async def chat_simple(user_message: str, system_message: Optional[str] = None) -
         
         return ChatResponse(
             message=response["message"],
+            workflow_id=response.get("workflow_id"),
             tool_calls=response.get("tool_calls"),
             usage=response.get("usage")
         )
@@ -145,8 +149,8 @@ async def chat_simple(user_message: str, system_message: Optional[str] = None) -
         raise HTTPException(status_code=500, detail=f"对话处理失败: {str(e)}")
 
 
-@router.post("/convert_risk_to_html", summary="将风险判断结果转换为 HTML 格式", response_class=HTMLResponse)
-async def convert_risk_to_html(request: Dict[str, Any]) -> HTMLResponse:
+@router.post("/convert_risk_to_html", summary="将风险判断结果转换为 HTML 格式")
+async def convert_risk_to_html(request: Dict[str, Any]) -> JSONResponse:
     """
     将风险等级判断的结果转换为 HTML 格式，用于邮件发送
     
@@ -158,15 +162,17 @@ async def convert_risk_to_html(request: Dict[str, Any]) -> HTMLResponse:
     3. 数组格式: [{"body": {"success": true, "data": {...}}}]
     
     Returns:
-        HTMLResponse: HTML 格式的邮件正文
+        JSONResponse: 包含 html_content 和 file_path 的 JSON 响应
+            - html_content: HTML 格式的邮件正文
+            - file_path: 文件的相对路径（相对于 uploads 目录）
     """
     try:
         logger.info(f"收到风险数据转 HTML 请求，数据类型: {type(request).__name__}")
         
         chat_service = LLMChatService()
-        html_content = await chat_service.convert_risk_to_html(request)
+        result = await chat_service.convert_risk_to_html(request)
         
-        return HTMLResponse(content=html_content)
+        return JSONResponse(content=result)
     
     except Exception as e:
         logger.error(f"风险数据转 HTML 失败: {str(e)}", exc_info=True)
@@ -180,5 +186,11 @@ async def convert_risk_to_html(request: Dict[str, Any]) -> HTMLResponse:
     <p style="color: red;">转换失败: {str(e)}</p>
 </body>
 </html>"""
-        return HTMLResponse(content=error_html, status_code=500)
+        return JSONResponse(
+            content={
+                "html_content": error_html,
+                "file_path": None
+            },
+            status_code=500
+        )
 

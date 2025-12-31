@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import FileUpload from "../../components/FileUpload";
 import {
@@ -17,6 +17,7 @@ import {
   contractApi,
   type ChatMessage,
   type ChatResponse,
+  type WorkflowStatusResponse,
 } from "../../api/client";
 
 // 定义合同类型
@@ -42,6 +43,7 @@ const HomePage: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   const simulateAIResponse = async (userMessage: string) => {
     setIsTyping(true);
@@ -80,6 +82,11 @@ const HomePage: React.FC = () => {
       };
 
       setMessages((prev) => [...prev, aiMessage]);
+
+      // 如果有 workflow_id，开始轮询工作流状态
+      if (response.workflow_id) {
+        startWorkflowPolling(response.workflow_id, aiMessage.id);
+      }
       // 如果需要确认多个文件处理
       if ((response as any).requires_confirmation && (response as any).files) {
         // 这里可以添加UI提示，让用户选择要处理的文件
@@ -157,6 +164,105 @@ const HomePage: React.FC = () => {
       handleSend();
     }
   };
+
+  // 开始轮询工作流状态
+  const startWorkflowPolling = (workflowId: string, messageId: string) => {
+    // 清除之前的轮询（如果存在）
+    const existingInterval = pollingIntervalsRef.current.get(messageId);
+    if (existingInterval) {
+      clearInterval(existingInterval);
+    }
+
+    // 立即查询一次状态
+    pollWorkflowStatus(workflowId, messageId);
+
+    // 每 2 秒轮询一次
+    const interval = setInterval(() => {
+      pollWorkflowStatus(workflowId, messageId);
+    }, 2000);
+
+    pollingIntervalsRef.current.set(messageId, interval);
+  };
+
+  // 轮询工作流状态
+  const pollWorkflowStatus = async (workflowId: string, messageId: string) => {
+    try {
+      const status: WorkflowStatusResponse = await contractApi.getWorkflowStatus(workflowId);
+
+      // 更新消息内容
+      setMessages((prev) => {
+        return prev.map((msg) => {
+          if (msg.id === messageId) {
+            let content = msg.content;
+
+            // 根据状态更新消息内容（只在 completed 或 failed 时更新）
+            if (status.status === "completed") {
+              // 工作流完成，显示结果
+              let resultText = status.message || "✅ 工作流处理完成。";
+              
+              if (status.result) {
+                // 格式化结果
+                const resultParts: string[] = [];
+                
+                if (status.result.file_path) {
+                  resultParts.push(`**处理文件**: ${status.result.file_path}`);
+                }
+                if (status.result.risk_level) {
+                  const riskLevel = status.result.risk_level;
+                  const riskEmoji = riskLevel === "high" ? "🔴" : riskLevel === "medium" ? "🟡" : "🟢";
+                  resultParts.push(`**风险等级**: ${riskEmoji} ${riskLevel}`);
+                }
+                
+                // 如果有其他结果数据，也显示出来
+                if (resultParts.length > 0) {
+                  resultText += "\n\n" + resultParts.join("\n\n");
+                }
+              }
+
+              content = resultText;
+            } else if (status.status === "failed") {
+              // 工作流失败
+              content = `❌ 工作流处理失败: ${status.error || status.message || "未知错误"}`;
+            }
+            // running 或 pending 状态下保持原消息不变（初始消息已经说明正在处理中）
+
+            return { ...msg, content };
+          }
+          return msg;
+        });
+      });
+
+      // 如果状态是 completed 或 failed，停止轮询
+      if (status.status === "completed" || status.status === "failed") {
+        const interval = pollingIntervalsRef.current.get(messageId);
+        if (interval) {
+          clearInterval(interval);
+          pollingIntervalsRef.current.delete(messageId);
+        }
+        // 停止轮询后，滚动到底部以显示最新消息
+        setTimeout(() => {
+          const messagesContainer = document.querySelector('.overflow-y-auto');
+          if (messagesContainer) {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          }
+        }, 100);
+      }
+    } catch (error: any) {
+      console.error("查询工作流状态失败:", error);
+      // 错误时不要更新消息，保持原样
+      // 可以添加错误重试逻辑，这里暂时不处理
+    }
+  };
+
+  // 组件卸载时清理所有轮询
+  useEffect(() => {
+    return () => {
+      pollingIntervalsRef.current.forEach((interval) => {
+        clearInterval(interval);
+      });
+      pollingIntervalsRef.current.clear();
+    };
+  }, []);
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">

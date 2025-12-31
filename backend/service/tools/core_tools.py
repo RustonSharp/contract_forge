@@ -14,20 +14,48 @@ from backend.service.tools.base import BaseTool
 from backend.service.tools.models import ToolInfo, ToolParameter, ToolResult
 
 
+def _convert_to_relative_path(file_path: str, uploads_dir: str = "./uploads") -> str:
+    """
+    将文件路径转换为相对路径（相对于 uploads 目录）
+    
+    Args:
+        file_path: 文件路径（可以是绝对路径、相对路径或文件名）
+        uploads_dir: uploads 目录路径，默认为 "./uploads"
+    
+    Returns:
+        相对路径（如 "2025-12-29/test_contract.pdf"），如果无法转换则返回原始路径
+    """
+    uploads_path = Path(uploads_dir).resolve()
+    file_path_obj = Path(file_path)
+    
+    # 如果是绝对路径，尝试转换为相对路径
+    if file_path_obj.is_absolute():
+        try:
+            relative = file_path_obj.relative_to(uploads_path)
+            return str(relative).replace("\\", "/")
+        except ValueError:
+            # 不在 uploads 目录下，返回原始路径
+            pass
+    
+    # 如果不是绝对路径，可能是相对于 uploads 的路径，直接返回（统一使用 / 作为分隔符）
+    return str(file_path).replace("\\", "/")
+
+
 def find_file_in_uploads(file_path: str, uploads_dir: str = "./uploads") -> Optional[str]:
     """
     在 uploads 目录中查找文件
     
     支持以下查找方式：
     1. 如果 file_path 是绝对路径且存在，直接返回
-    2. 如果 file_path 是相对路径且存在，直接返回
-    3. 如果只是文件名，在 uploads 目录下查找：
+    2. 如果 file_path 是相对路径且存在（相对于当前工作目录），直接返回
+    3. 如果 file_path 包含路径分隔符（如 "2025-12-29/test.pdf"），尝试在 uploads 目录下查找
+    4. 如果只是文件名，在 uploads 目录下查找：
        - 精确匹配文件名
        - 匹配文件名（忽略扩展名）
        - 匹配包含该文件名的文件
     
     Args:
-        file_path: 文件路径或文件名
+        file_path: 文件路径或文件名（支持相对路径，如 "2025-12-29/test.pdf"，相对于 uploads 目录）
         uploads_dir: uploads 目录路径，默认为 "./uploads"
     
     Returns:
@@ -37,7 +65,7 @@ def find_file_in_uploads(file_path: str, uploads_dir: str = "./uploads") -> Opti
     if os.path.isabs(file_path) and os.path.exists(file_path):
         return file_path
     
-    # 如果是相对路径且存在，直接返回
+    # 如果是相对路径且存在（相对于当前工作目录），直接返回
     if os.path.exists(file_path):
         return os.path.abspath(file_path)
     
@@ -46,28 +74,39 @@ def find_file_in_uploads(file_path: str, uploads_dir: str = "./uploads") -> Opti
     if not uploads_path.exists():
         return None
     
+    # 如果 file_path 包含路径分隔符（相对路径，如 "2025-12-29/test.pdf"），尝试在 uploads 目录下查找
+    if "/" in file_path or "\\" in file_path:
+        relative_path = uploads_path / file_path
+        if relative_path.exists() and relative_path.is_file():
+            return str(relative_path.resolve())
+    
     file_name = Path(file_path).name
     file_stem = Path(file_path).stem  # 不带扩展名的文件名
     
-    # 1. 精确匹配文件名
+    # 1. 精确匹配文件名（在 uploads 根目录下）
     exact_match = uploads_path / file_name
     if exact_match.exists() and exact_match.is_file():
         return str(exact_match.resolve())
     
-    # 2. 匹配文件名（忽略扩展名）
-    for file in uploads_path.iterdir():
-        if file.is_file() and file.stem == file_stem:
+    # 2. 递归查找：在所有子目录中查找文件名
+    for file in uploads_path.rglob(file_name):
+        if file.is_file():
             return str(file.resolve())
     
-    # 3. 匹配文件名开头（适用于 UUID 开头的文件名）
+    # 3. 匹配文件名（忽略扩展名）
+    for file in uploads_path.rglob(f"{file_stem}.*"):
+        if file.is_file():
+            return str(file.resolve())
+    
+    # 4. 匹配文件名开头（适用于 UUID 开头的文件名）
     # 例如：contract_id = "172c63a7-8698-49aa-89c8-cbc316e446b1"
     # 可以匹配 "172c63a7-8698-49aa-89c8-cbc316e446b1_test_contract.pdf"
-    for file in uploads_path.iterdir():
+    for file in uploads_path.rglob(f"{file_name}*"):
         if file.is_file() and file.name.startswith(file_name):
             return str(file.resolve())
     
-    # 4. 匹配包含该文件名的文件（部分匹配）
-    for file in uploads_path.iterdir():
+    # 5. 匹配包含该文件名的文件（部分匹配）
+    for file in uploads_path.rglob(f"*{file_name}*"):
         if file.is_file() and file_name in file.name:
             return str(file.resolve())
     
@@ -118,12 +157,14 @@ class DocumentParserTool(BaseTool):
             file_path = kwargs.get("file_path")
             extract_structure = kwargs.get("extract_structure", True)
             
+            # 获取项目根目录的 uploads 目录路径（用于后续相对路径转换）
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            uploads_dir = project_root / "uploads"
+            
             # 查找文件（支持文件名自动查找）
             resolved_path = find_file_in_uploads(file_path)
             if not resolved_path:
                 # 尝试查找项目根目录下的 uploads
-                project_root = Path(__file__).resolve().parent.parent.parent.parent
-                uploads_dir = project_root / "uploads"
                 resolved_path = find_file_in_uploads(file_path, str(uploads_dir))
             
             if not resolved_path:
@@ -134,10 +175,23 @@ class DocumentParserTool(BaseTool):
                 )
             
             # 使用找到的文件路径
-            file_path = resolved_path
+            absolute_file_path = resolved_path
+            
+            # 保存原始输入路径（可能是相对路径）
+            original_file_path = kwargs.get("file_path")
+            
+            # 转换为相对路径（相对于 uploads 目录）
+            # 使用项目根目录的 uploads
+            relative_file_path = _convert_to_relative_path(absolute_file_path, str(uploads_dir))
             
             # 获取文件扩展名
-            file_ext = Path(file_path).suffix.lower()
+            file_ext = Path(absolute_file_path).suffix.lower()
+            
+            # 如果原始输入已经是相对路径格式，优先使用原始输入
+            if original_file_path and ("/" in original_file_path or "\\" in original_file_path):
+                if not Path(original_file_path).is_absolute():
+                    # 原始输入是相对路径，使用它
+                    relative_file_path = original_file_path.replace("\\", "/")
             
             # 解析文档
             text_content = ""
@@ -147,7 +201,7 @@ class DocumentParserTool(BaseTool):
                 # 解析 PDF
                 try:
                     import fitz  # PyMuPDF
-                    doc = fitz.open(file_path)
+                    doc = fitz.open(absolute_file_path)
                     total_pages = len(doc)  # 在关闭文档前保存总页数
                     pages = []
                     for page_num in range(total_pages):
@@ -182,7 +236,7 @@ class DocumentParserTool(BaseTool):
                 # 解析 DOCX
                 try:
                     from docx import Document
-                    doc = Document(file_path)
+                    doc = Document(absolute_file_path)
                     
                     paragraphs = []
                     for para in doc.paragraphs:
@@ -215,7 +269,7 @@ class DocumentParserTool(BaseTool):
                 )
             
             result_data = {
-                "file_path": file_path,
+                "file_path": relative_file_path,  # 使用相对路径
                 "file_type": file_ext,
                 "text_content": text_content.strip(),
                 "structure": structure if extract_structure else None,
@@ -281,16 +335,41 @@ class OCRParserTool(BaseTool):
             image_path = kwargs.get("image_path")
             language = kwargs.get("language", "zh+en")
             
-            # 检查文件是否存在
-            if not os.path.exists(image_path):
+            # 保存原始输入路径
+            original_image_path = image_path
+            
+            # 查找文件（支持文件名自动查找）
+            resolved_path = find_file_in_uploads(image_path)
+            if not resolved_path:
+                # 尝试查找项目根目录下的 uploads
+                project_root = Path(__file__).resolve().parent.parent.parent.parent
+                uploads_dir = project_root / "uploads"
+                resolved_path = find_file_in_uploads(image_path, str(uploads_dir))
+            
+            if not resolved_path:
                 return ToolResult(
                     success=False,
-                    error=f"图片文件不存在: {image_path}",
+                    error=f"图片文件不存在: {image_path}。已尝试在 uploads 目录下查找，未找到匹配的文件。",
                     execution_time=time.time() - start_time
                 )
             
+            # 使用找到的文件路径
+            absolute_image_path = resolved_path
+            
+            # 转换为相对路径（相对于 uploads 目录）
+            # 使用项目根目录的 uploads
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            uploads_dir = project_root / "uploads"
+            relative_image_path = _convert_to_relative_path(absolute_image_path, str(uploads_dir))
+            
+            # 如果原始输入已经是相对路径格式，优先使用原始输入
+            if original_image_path and ("/" in original_image_path or "\\" in original_image_path):
+                if not Path(original_image_path).is_absolute():
+                    # 原始输入是相对路径，使用它
+                    relative_image_path = original_image_path.replace("\\", "/")
+            
             # 检查文件格式
-            file_ext = Path(image_path).suffix.lower()
+            file_ext = Path(absolute_image_path).suffix.lower()
             supported_formats = [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"]
             if file_ext not in supported_formats:
                 return ToolResult(
@@ -304,7 +383,7 @@ class OCRParserTool(BaseTool):
             try:
                 from paddleocr import PaddleOCR  # type: ignore
                 ocr = PaddleOCR(use_angle_cls=True, lang='ch')
-                result = ocr.ocr(image_path, cls=True)
+                result = ocr.ocr(absolute_image_path, cls=True)
                 
                 # 解析 OCR 结果
                 texts = []
@@ -317,7 +396,7 @@ class OCRParserTool(BaseTool):
             except ImportError:
                 # 如果没有安装 PaddleOCR，使用简单的模拟实现
                 # 实际项目中应该安装: pip install paddleocr
-                ocr_text = f"[模拟 OCR 结果] 从图片 {image_path} 识别出的文本内容。\n" \
+                ocr_text = f"[模拟 OCR 结果] 从图片 {relative_image_path} 识别出的文本内容。\n" \
                           f"提示: 安装 PaddleOCR 以获得真实的 OCR 功能: pip install paddleocr"
             except Exception as e:
                 return ToolResult(
@@ -327,7 +406,7 @@ class OCRParserTool(BaseTool):
                 )
             
             result_data = {
-                "image_path": image_path,
+                "image_path": relative_image_path,  # 使用相对路径
                 "language": language,
                 "recognized_text": ocr_text.strip(),
                 "text_length": len(ocr_text),
@@ -498,6 +577,12 @@ class RiskAssessmentTool(BaseTool):
                     required=True
                 ),
                 ToolParameter(
+                    name="file_path",
+                    type="string",
+                    description="合同文件相对路径（相对于 uploads 目录，如 '2025-12-29/test_contract.pdf'），用于在输出结果中包含文件位置信息",
+                    required=False
+                ),
+                ToolParameter(
                     name="regulations",
                     type="array",
                     description="相关法规条文列表（可选，如果不提供则自动检索）",
@@ -531,6 +616,7 @@ class RiskAssessmentTool(BaseTool):
                 )
             
             contract_text = kwargs.get("contract_text", "")
+            file_path = kwargs.get("file_path")  # 获取 file_path 参数
             regulations = kwargs.get("regulations")
             risk_types = kwargs.get("risk_types", ["legal", "financial"])
             
@@ -566,6 +652,7 @@ class RiskAssessmentTool(BaseTool):
             overall_risk_level = self._calculate_risk_level(risks)
             
             result_data = {
+                "file_path": file_path,  # 包含文件相对路径
                 "contract_text_length": len(contract_text),
                 "regulations_count": len(regulations) if regulations else 0,
                 "risk_types_analyzed": risk_types,
