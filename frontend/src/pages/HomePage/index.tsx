@@ -6,7 +6,6 @@ import {
   Bot,
   User,
   Activity,
-  FileCheck,
   CheckCircle2,
   Circle,
   Loader2,
@@ -265,24 +264,9 @@ const HomePage: React.FC = () => {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-8 py-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
-            <FileCheck className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-gray-900">智能合同处理自动化系统</h1>
-            <p className="text-gray-500">
-              Contract Processing Automation System
-            </p>
-          </div>
-        </div>
-      </header>
-
+    <div className="h-full flex flex-col">
       {/* Main Content */}
-      <main className="flex-1 flex gap-6 p-6 overflow-hidden">
+      <div className="flex-1 flex gap-6 p-6 overflow-hidden">
         {/* Left Panel - Upload */}
         <div className="w-80 rounded-lg border border-gray-200 shadow-sm overflow-hidden">
           <FileUpload
@@ -498,7 +482,7 @@ const HomePage: React.FC = () => {
             </div>
           </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 };
