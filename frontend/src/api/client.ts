@@ -229,6 +229,30 @@ export const contractApi = {
     const response = await api.get(`/workflow/progress/${workflowId}`);
     return response.data as WorkflowProgressResponse;
   },
+
+  // 更新工作流状态
+  updateWorkflowStatus: async (
+    workflowId: string,
+    status: "pending" | "running" | "completed" | "failed",
+    options?: {
+      current_node?: string;
+      completed_nodes?: string[];
+      message?: string;
+      error?: string;
+      result?: Record<string, any>;
+    }
+  ) => {
+    const response = await api.post("/workflow/status/update", {
+      workflow_id: workflowId,
+      status,
+      current_node: options?.current_node,
+      completed_nodes: options?.completed_nodes,
+      message: options?.message,
+      error: options?.error,
+      result: options?.result,
+    });
+    return response.data;
+  },
 };
 
 export default api;

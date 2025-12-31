@@ -7,19 +7,38 @@
         "path": "contract-processing-webhook",
         "options": {}
       },
-      "id": "4fd06c9d-98ad-4b63-a4ef-47edda59c2ad",
+      "id": "97e2b1a8-803e-4711-ac7d-5f89831ff21c",
       "name": "Webhook - 合同处理触发",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
       "position": [
-        -6272,
-        -16
+        -7424,
+        -192
       ],
       "webhookId": "contract-processing-webhook",
       "httpMethod": "POST",
       "path": "contract-process",
       "responseMode": "responseNode",
       "options": {}
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/workflow/status/update",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"workflow_id\": $('Webhook - 合同处理触发').item.json.body.workflow_id, \"status\": \"running\", \"message\": \"工作流已开始\", \"completed_nodes\": [\"Webhook - 合同处理触发\"], \"current_node\": \"步骤1: 文档解析\" } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -7256,
+        -192
+      ],
+      "id": "a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5g6h7",
+      "name": "更新状态 - Webhook完成",
+      "notes": "更新Webhook节点状态为完成"
     },
     {
       "parameters": {
@@ -36,34 +55,15 @@
           }
         }
       },
-      "id": "05a3ca08-8dd7-4ca3-ba74-b031dff5fa1a",
+      "id": "48c37928-234a-4d96-bd06-134707620d54",
       "name": "步骤1: 文档解析",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        -5872,
-        -16
+        -7088,
+        -192
       ],
       "notes": "调用文档解析工具，提取合同文本"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://host.docker.internal:8000/api/workflow/status/update",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ { \"workflow_id\": $('Webhook - 合同处理触发').item.json.body.workflow_id, \"status\": \"running\", \"message\": \"工作流已开始\", \"current_node\": \"步骤1: 文档解析\" } }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.3,
-      "position": [
-        -6072,
-        -16
-      ],
-      "id": "workflow-start-status-update",
-      "name": "更新状态 - 工作流开始",
-      "notes": "更新工作流状态为运行中"
     },
     {
       "parameters": {
@@ -80,13 +80,13 @@
           }
         }
       },
-      "id": "dcd7511c-de04-4384-963e-ac9f5c5daa71",
+      "id": "05c69430-6271-45ab-ba51-ca9089f0b5db",
       "name": "步骤2: 风险评估",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        -5376,
-        -16
+        -6528,
+        -192
       ],
       "notes": "调用风险评估工具，分析合同风险"
     },
@@ -142,13 +142,13 @@
         },
         "options": {}
       },
-      "id": "d3e1dcc4-8337-4c93-958b-cc500062f929",
+      "id": "c7cfb554-9942-46f2-bf3e-137809cc893f",
       "name": "风险等级判断",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
       "position": [
-        -4864,
-        -16
+        -6016,
+        -192
       ],
       "notes": "根据风险等级进行分支处理"
     },
@@ -167,13 +167,13 @@
           }
         }
       },
-      "id": "87d52542-bb5c-48b4-9488-d4ebf84b3e01",
+      "id": "5c083ad6-3f92-4f6f-809f-fd7806aff2c7",
       "name": "低/中风险: 自动审批",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        -4352,
-        -272
+        -5504,
+        -448
       ],
       "notes": "低风险或中风险合同，调用自动审批API"
     },
@@ -185,13 +185,13 @@
         "html": "={{ $json.html_content }}",
         "options": {}
       },
-      "id": "f79f9b8a-61c0-40d6-ba20-1d2ddbb1b3c7",
+      "id": "335d9198-d4f0-4029-973a-0029df211aa1",
       "name": "高风险: 邮件通知法务",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        -4144,
-        80
+        -5296,
+        -96
       ],
       "webhookId": "57b072b0-fade-4620-9bce-94f5be43bb1f",
       "credentials": {
@@ -214,10 +214,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        -4560,
-        112
+        -5712,
+        -64
       ],
-      "id": "a6c2f5f1-a7ec-43ab-bdb9-abe8177c8233",
+      "id": "1ef1a0c4-7d39-4a50-8e01-2803b7c5a732",
       "name": "风险评估结果转HTML",
       "notes": "将风险评估结果转换为HTML格式，用于邮件发送"
     },
@@ -233,10 +233,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        -5680,
-        -16
+        -6832,
+        -192
       ],
-      "id": "864415ed-43de-4aa8-bdca-d8a0bf1cc744",
+      "id": "410dbb80-0f3c-4d81-a3a4-a09cf6534b33",
       "name": "更新状态 - 步骤1完成",
       "notes": "更新工作流状态"
     },
@@ -257,10 +257,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -5536,
-        -16
+        -6688,
+        -192
       ],
-      "id": "edaeff80-e934-4d2b-8b3e-ac745179ece9",
+      "id": "53c1c5e5-f99e-4d63-8e87-82f3e5782a63",
       "name": "传递数据 - 步骤1到步骤2",
       "notes": "显式传递步骤1的完整数据到步骤2"
     },
@@ -276,10 +276,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        -5168,
-        -16
+        -6320,
+        -192
       ],
-      "id": "368c4a93-56e9-4292-b552-02bb17084ffe",
+      "id": "9e90629a-5c46-414d-80c8-112914218a4f",
       "name": "更新状态 - 步骤2完成",
       "notes": "更新工作流状态"
     },
@@ -300,10 +300,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -5008,
-        -16
+        -6160,
+        -192
       ],
-      "id": "823fe9be-1770-40d0-ae52-52fbc7e672c9",
+      "id": "b125e6cb-40ee-49d5-b3cb-adc99e40970f",
       "name": "传递数据 - 步骤2到风险判断",
       "notes": "显式传递步骤2的完整数据到风险等级判断"
     },
@@ -319,10 +319,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        -3872,
-        -128
+        -5024,
+        -304
       ],
-      "id": "6273d0a5-b5b7-48d8-98f9-7e3817253136",
+      "id": "b3cc13c6-2437-4d3d-a77e-05eb977eac47",
       "name": "更新工作流状态 - 低/中风险",
       "notes": "更新工作流状态为完成，并完整传递上一步的数据"
     },
@@ -338,10 +338,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        -3872,
-        80
+        -5024,
+        -96
       ],
-      "id": "00cbb572-ff3c-4c22-af5c-b40e94727db5",
+      "id": "469282f2-0f6c-46fd-8fb2-d926573fb5a0",
       "name": "更新工作流状态 - 高风险",
       "notes": "更新工作流状态为完成，并完整传递上一步的数据"
     }
@@ -352,14 +352,14 @@
       "main": [
         [
           {
-            "node": "更新状态 - 工作流开始",
+            "node": "更新状态 - Webhook完成",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "更新状态 - 工作流开始": {
+    "更新状态 - Webhook完成": {
       "main": [
         [
           {
@@ -486,16 +486,6 @@
           }
         ]
       ]
-    },
-    "更新工作流状态 - 低/中风险": {
-      "main": [
-        []
-      ]
-    },
-    "更新工作流状态 - 高风险": {
-      "main": [
-        []
-      ]
     }
   },
   "active": false,
@@ -503,7 +493,7 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "fcf5b978-2d9b-4ca4-9037-157f8646ca33",
+  "versionId": "3840eda4-3b23-415b-a21f-19009a478fcf",
   "meta": {
     "instanceId": "1b896727c204de6af5351095bc9bd64904a683b5008d9bbdbc11a5c26f7f14a2"
   },

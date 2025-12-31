@@ -2,23 +2,14 @@ import React, { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import FileUpload from "../../components/FileUpload";
 import WorkflowPanel from "../../components/WorkflowPanel";
-import {
-  Send,
-  Bot,
-  User,
-  Activity,
-  CheckCircle2,
-  Circle,
-  Loader2,
-  AlertCircle,
-  Workflow,
-} from "lucide-react";
+import { Send, Bot, User, Workflow } from "lucide-react";
 
 import {
   contractApi,
   type ChatMessage,
   type ChatResponse,
   type WorkflowStatusResponse,
+  type WorkflowDefinitionResponse,
 } from "../../api/client";
 
 // 定义合同类型
@@ -46,7 +37,88 @@ const HomePage: React.FC = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [workflowId, setWorkflowId] = useState<string | null>(null);
   const [showWorkflowPanel, setShowWorkflowPanel] = useState(false); // 默认关闭，当收到 workflow_id 时自动打开
-  const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const pollingIntervalsRef = useRef<
+    Map<string, ReturnType<typeof setInterval>>
+  >(new Map());
+
+  // 获取工作流定义中的第一个业务节点名称
+  const getFirstBusinessNode = async (
+    configFile: string = "合同处理自动化流程.json"
+  ): Promise<string | null> => {
+    try {
+      const definition: WorkflowDefinitionResponse =
+        await contractApi.getWorkflowDefinition(configFile);
+
+      if (!definition || !definition.nodes || definition.nodes.length === 0) {
+        console.warn("工作流定义为空或没有节点");
+        return null;
+      }
+
+      const nodes = definition.nodes;
+      const connections = definition.connections;
+
+      // 找到起始节点（通常是 webhook）
+      const startNode = nodes.find(
+        (node) => node.type.includes("webhook") || node.name.includes("触发")
+      );
+
+      if (!startNode) {
+        // 如果没有起始节点，返回第一个节点
+        console.warn("未找到起始节点，使用第一个节点");
+        return nodes[0]?.name || null;
+      }
+
+      // 从起始节点开始，根据连接关系找到第一个业务节点
+      const findFirstBusinessNode = (
+        nodeName: string,
+        visited: Set<string> = new Set()
+      ): string | null => {
+        if (visited.has(nodeName)) {
+          return null; // 防止循环
+        }
+        visited.add(nodeName);
+
+        const nodeConnections = connections[nodeName];
+        if (!nodeConnections?.main || nodeConnections.main.length === 0) {
+          return null; // 没有后续节点
+        }
+
+        // 遍历所有输出连接
+        for (const outputGroup of nodeConnections.main) {
+          for (const output of outputGroup) {
+            const nextNodeName = output.node;
+            if (!nextNodeName) continue;
+
+            // 跳过状态更新节点和传递数据节点
+            if (
+              nextNodeName.includes("更新状态") ||
+              nextNodeName.includes("更新工作流状态") ||
+              nextNodeName.includes("传递数据")
+            ) {
+              // 递归查找下一个节点
+              const result = findFirstBusinessNode(nextNodeName, visited);
+              if (result) return result;
+              continue;
+            }
+
+            // 找到第一个业务节点
+            const nextNode = nodes.find((n) => n.name === nextNodeName);
+            if (nextNode) {
+              return nextNodeName;
+            }
+          }
+        }
+
+        return null;
+      };
+
+      const firstNode = findFirstBusinessNode(startNode.name);
+      return firstNode || null;
+    } catch (error) {
+      console.error("获取第一个业务节点失败:", error);
+      return null;
+    }
+  };
 
   const simulateAIResponse = async (userMessage: string) => {
     setIsTyping(true);
@@ -68,7 +140,10 @@ const HomePage: React.FC = () => {
       let response: ChatResponse;
       if (selectedContract) {
         // 选中了合同，使用指定文件路径的接口（Contract 的 id 就是 file_path）
-        response = await contractApi.chatWithFileName(selectedContract.id, chatMessages);
+        response = await contractApi.chatWithFileName(
+          selectedContract.id,
+          chatMessages
+        );
       } else {
         // 未选中合同，使用智能查找接口
         response = await contractApi.chat(chatMessages);
@@ -96,13 +171,36 @@ const HomePage: React.FC = () => {
         console.log("✅ 收到 workflow_id:", response.workflow_id);
         setWorkflowId(response.workflow_id);
         setShowWorkflowPanel(true); // 自动打开工作流面板
+
+        // 动态获取第一个业务节点并标记为完成
+        try {
+          const firstNodeName = await getFirstBusinessNode();
+          if (firstNodeName) {
+            console.log("✅ 找到第一个业务节点:", firstNodeName);
+            await contractApi.updateWorkflowStatus(
+              response.workflow_id,
+              "running",
+              {
+                completed_nodes: [firstNodeName],
+                message: `工作流已开始，${firstNodeName}已完成`,
+              }
+            );
+            console.log("✅ 第一个节点已标记为完成:", firstNodeName);
+          } else {
+            console.warn("⚠️ 无法获取第一个业务节点，跳过状态更新");
+          }
+        } catch (error) {
+          console.error("❌ 更新第一个节点状态失败:", error);
+          // 不阻止后续流程，继续轮询
+        }
+
         startWorkflowPolling(response.workflow_id, aiMessage.id);
       } else {
         console.log("❌ 响应中没有 workflow_id", {
           workflow_id: response.workflow_id,
           has_workflow_id: !!response.workflow_id,
           workflow_id_trimmed: response.workflow_id?.trim(),
-          full_response: response
+          full_response: response,
         });
         // 如果这次响应没有 workflow_id，不清除之前的 workflowId
         // 这样用户可以继续查看之前的工作流进度
@@ -208,7 +306,8 @@ const HomePage: React.FC = () => {
   // 轮询工作流状态
   const pollWorkflowStatus = async (workflowId: string, messageId: string) => {
     try {
-      const status: WorkflowStatusResponse = await contractApi.getWorkflowStatus(workflowId);
+      const status: WorkflowStatusResponse =
+        await contractApi.getWorkflowStatus(workflowId);
 
       // 更新消息内容
       setMessages((prev) => {
@@ -220,20 +319,25 @@ const HomePage: React.FC = () => {
             if (status.status === "completed") {
               // 工作流完成，显示结果
               let resultText = status.message || "✅ 工作流处理完成。";
-              
+
               if (status.result) {
                 // 格式化结果
                 const resultParts: string[] = [];
-                
+
                 if (status.result.file_path) {
                   resultParts.push(`**处理文件**: ${status.result.file_path}`);
                 }
                 if (status.result.risk_level) {
                   const riskLevel = status.result.risk_level;
-                  const riskEmoji = riskLevel === "high" ? "🔴" : riskLevel === "medium" ? "🟡" : "🟢";
+                  const riskEmoji =
+                    riskLevel === "high"
+                      ? "🔴"
+                      : riskLevel === "medium"
+                      ? "🟡"
+                      : "🟢";
                   resultParts.push(`**风险等级**: ${riskEmoji} ${riskLevel}`);
                 }
-                
+
                 // 如果有其他结果数据，也显示出来
                 if (resultParts.length > 0) {
                   resultText += "\n\n" + resultParts.join("\n\n");
@@ -243,7 +347,9 @@ const HomePage: React.FC = () => {
               content = resultText;
             } else if (status.status === "failed") {
               // 工作流失败
-              content = `❌ 工作流处理失败: ${status.error || status.message || "未知错误"}`;
+              content = `❌ 工作流处理失败: ${
+                status.error || status.message || "未知错误"
+              }`;
             }
             // running 或 pending 状态下保持原消息不变（初始消息已经说明正在处理中）
 
@@ -262,7 +368,7 @@ const HomePage: React.FC = () => {
         }
         // 停止轮询后，滚动到底部以显示最新消息
         setTimeout(() => {
-          const messagesContainer = document.querySelector('.overflow-y-auto');
+          const messagesContainer = document.querySelector(".overflow-y-auto");
           if (messagesContainer) {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
           }
@@ -305,7 +411,9 @@ const HomePage: React.FC = () => {
             <div>
               <h2 className="text-gray-900">AI 助手</h2>
               {selectedContract && (
-                <p className="text-gray-500">当前合同：{selectedContract.name}</p>
+                <p className="text-gray-500">
+                  当前合同：{selectedContract.name}
+                </p>
               )}
             </div>
             {workflowId && workflowId.trim() ? (
@@ -320,7 +428,10 @@ const HomePage: React.FC = () => {
                 <span>查看工作流进度</span>
               </button>
             ) : (
-              <div className="text-xs text-gray-400" style={{ display: 'none' }}>
+              <div
+                className="text-xs text-gray-400"
+                style={{ display: "none" }}
+              >
                 {/* 调试：当前 workflowId = {workflowId || "null"} */}
               </div>
             )}
