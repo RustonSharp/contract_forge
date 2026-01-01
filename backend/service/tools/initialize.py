@@ -72,8 +72,8 @@ def initialize_default_tools():
     registry.register(n8n_trigger)
     
     # 12. 电子签名工具
-    digital_signature = DigitalSignatureTool()
-    registry.register(digital_signature)
+    # digital_signature = DigitalSignatureTool()
+    # registry.register(digital_signature)
     
     print(f"✓ 已注册 {registry.count()} 个工具:")
     for tool_name in registry.list_tool_names():
