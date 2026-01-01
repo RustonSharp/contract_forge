@@ -1936,3 +1936,382 @@ class ImageToPdfTool(BaseTool):
                 execution_time=time.time() - start_time
             )
 
+
+class DigitalSignatureTool(BaseTool):
+    """电子签名工具 - 支持文件数字签名和签名验证"""
+    
+    def __init__(self):
+        super().__init__()
+        # 密钥存储目录
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        self.keys_dir = project_root / "keys"
+        self.keys_dir.mkdir(exist_ok=True)
+        self.signatures_dir = project_root / "signatures"
+        self.signatures_dir.mkdir(exist_ok=True)
+        self.logger = get_logger(__name__)
+    
+    def get_info(self) -> ToolInfo:
+        return ToolInfo(
+            name="digital_signature",
+            display_name="电子签名工具",
+            description="对文件进行数字签名，或验证文件的数字签名。支持生成密钥对、签名文件和验证签名功能。",
+            parameters=[
+                ToolParameter(
+                    name="action",
+                    type="string",
+                    description="操作类型：'sign'（签名文件）或 'verify'（验证签名）。默认：'sign'",
+                    required=False,
+                    default="sign"
+                ),
+                ToolParameter(
+                    name="file_path",
+                    type="string",
+                    description="要签名或验证的文件路径（支持相对路径，如 '2025-12-29/test_contract.pdf'）",
+                    required=True
+                ),
+                ToolParameter(
+                    name="signer_name",
+                    type="string",
+                    description="签名者名称（用于签名操作）",
+                    required=False
+                ),
+                ToolParameter(
+                    name="signature_file_path",
+                    type="string",
+                    description="签名文件路径（用于验证操作，如果为空则自动查找）",
+                    required=False
+                ),
+                ToolParameter(
+                    name="public_key_path",
+                    type="string",
+                    description="公钥文件路径（用于验证操作，如果为空则自动查找）",
+                    required=False
+                )
+            ],
+            category="security",
+            version="1.0.0"
+        )
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        """执行电子签名操作"""
+        start_time = time.time()
+        
+        try:
+            # 验证参数
+            is_valid, error_msg = self.validate_parameters(**kwargs)
+            if not is_valid:
+                return ToolResult(
+                    success=False,
+                    error=error_msg,
+                    execution_time=time.time() - start_time
+                )
+            
+            action = kwargs.get("action", "sign")
+            file_path = kwargs.get("file_path")
+            
+            if action == "sign":
+                return await self._sign_file(file_path, kwargs.get("signer_name"), start_time)
+            elif action == "verify":
+                return await self._verify_signature(
+                    file_path,
+                    kwargs.get("signature_file_path"),
+                    kwargs.get("public_key_path"),
+                    start_time
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=f"不支持的操作类型: {action}。支持的操作: 'sign', 'verify'",
+                    execution_time=time.time() - start_time
+                )
+                
+        except Exception as e:
+            self.logger.error(f"执行电子签名操作时发生错误: {str(e)}", exc_info=True)
+            return ToolResult(
+                success=False,
+                error=f"执行电子签名操作时发生错误: {str(e)}",
+                execution_time=time.time() - start_time
+            )
+    
+    async def _sign_file(self, file_path: str, signer_name: Optional[str], start_time: float) -> ToolResult:
+        """对文件进行数字签名"""
+        try:
+            # 导入 cryptography 库
+            try:
+                from cryptography.hazmat.primitives import hashes, serialization
+                from cryptography.hazmat.primitives.asymmetric import rsa, padding
+                from cryptography.hazmat.backends import default_backend
+            except ImportError:
+                return ToolResult(
+                    success=False,
+                    error="cryptography 库未安装。请运行: pip install cryptography",
+                    execution_time=time.time() - start_time
+                )
+            
+            # 查找文件
+            resolved_path = find_file_in_uploads(file_path)
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            uploads_dir = project_root / "uploads"
+            if not resolved_path:
+                resolved_path = find_file_in_uploads(file_path, str(uploads_dir))
+            
+            if not resolved_path or not os.path.exists(resolved_path):
+                return ToolResult(
+                    success=False,
+                    error=f"文件不存在: {file_path}",
+                    execution_time=time.time() - start_time
+                )
+            
+            # 如果没有提供签名者名称，使用默认名称
+            if not signer_name:
+                signer_name = "default_signer"
+            
+            # 获取或生成密钥对
+            private_key, _ = await self._get_or_generate_key_pair(signer_name)
+            
+            # 读取文件内容
+            with open(resolved_path, 'rb') as f:
+                file_data = f.read()
+            
+            # 创建签名
+            signature = private_key.sign(
+                file_data,
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            
+            # 保存签名文件
+            file_name = Path(resolved_path).stem
+            signature_file = self.signatures_dir / f"{file_name}_{signer_name}.sig"
+            with open(signature_file, 'wb') as f:
+                f.write(signature)
+            
+            # 获取公钥文件路径
+            public_key_file = self.keys_dir / f"{signer_name}_public_key.pem"
+            
+            # 转换为相对路径
+            relative_file_path = _convert_to_relative_path(str(resolved_path), str(uploads_dir))
+            relative_signature_path = _convert_to_relative_path(
+                str(signature_file),
+                str(project_root)
+            )
+            
+            result_data = {
+                "action": "sign",
+                "file_path": relative_file_path,
+                "signer_name": signer_name,
+                "signature_file": relative_signature_path,
+                "public_key_file": _convert_to_relative_path(
+                    str(public_key_file),
+                    str(project_root)
+                ),
+                "signature_algorithm": "RSA-PSS with SHA-256",
+                "status": "completed"
+            }
+            
+            return ToolResult(
+                success=True,
+                data=result_data,
+                execution_time=time.time() - start_time
+            )
+            
+        except Exception as e:
+            self.logger.error(f"签名文件时发生错误: {str(e)}", exc_info=True)
+            return ToolResult(
+                success=False,
+                error=f"签名文件时发生错误: {str(e)}",
+                execution_time=time.time() - start_time
+            )
+    
+    async def _verify_signature(
+        self,
+        file_path: str,
+        signature_file_path: Optional[str],
+        public_key_path: Optional[str],
+        start_time: float
+    ) -> ToolResult:
+        """验证文件的数字签名"""
+        try:
+            # 导入 cryptography 库
+            try:
+                from cryptography.hazmat.primitives import hashes, serialization
+                from cryptography.hazmat.primitives.asymmetric import padding
+                from cryptography.hazmat.backends import default_backend
+            except ImportError:
+                return ToolResult(
+                    success=False,
+                    error="cryptography 库未安装。请运行: pip install cryptography",
+                    execution_time=time.time() - start_time
+                )
+            
+            # 查找文件
+            resolved_path = find_file_in_uploads(file_path)
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            uploads_dir = project_root / "uploads"
+            if not resolved_path:
+                resolved_path = find_file_in_uploads(file_path, str(uploads_dir))
+            
+            if not resolved_path or not os.path.exists(resolved_path):
+                return ToolResult(
+                    success=False,
+                    error=f"文件不存在: {file_path}",
+                    execution_time=time.time() - start_time
+                )
+            
+            # 查找签名文件
+            if signature_file_path:
+                if not os.path.isabs(signature_file_path):
+                    signature_file = project_root / signature_file_path
+                else:
+                    signature_file = Path(signature_file_path)
+            else:
+                # 自动查找签名文件
+                file_name = Path(resolved_path).stem
+                signature_files = list(self.signatures_dir.glob(f"{file_name}_*.sig"))
+                if not signature_files:
+                    return ToolResult(
+                        success=False,
+                        error=f"未找到签名文件。请提供 signature_file_path 参数，或确保签名文件存在于 signatures 目录中",
+                        execution_time=time.time() - start_time
+                    )
+                signature_file = signature_files[0]  # 使用第一个找到的签名文件
+            
+            if not signature_file.exists():
+                return ToolResult(
+                    success=False,
+                    error=f"签名文件不存在: {signature_file}",
+                    execution_time=time.time() - start_time
+                )
+            
+            # 读取签名
+            with open(signature_file, 'rb') as f:
+                signature = f.read()
+            
+            # 查找公钥文件
+            if public_key_path:
+                if not os.path.isabs(public_key_path):
+                    public_key_file = project_root / public_key_path
+                else:
+                    public_key_file = Path(public_key_path)
+            else:
+                # 从签名文件名中提取签名者名称
+                signer_name = signature_file.stem.rsplit('_', 1)[-1] if '_' in signature_file.stem else "default_signer"
+                public_key_file = self.keys_dir / f"{signer_name}_public_key.pem"
+            
+            if not public_key_file.exists():
+                return ToolResult(
+                    success=False,
+                    error=f"公钥文件不存在: {public_key_file}。请提供 public_key_path 参数",
+                    execution_time=time.time() - start_time
+                )
+            
+            # 加载公钥
+            with open(public_key_file, 'rb') as f:
+                public_key = serialization.load_pem_public_key(f.read(), backend=default_backend())
+            
+            # 读取文件内容
+            with open(resolved_path, 'rb') as f:
+                file_data = f.read()
+            
+            # 验证签名
+            try:
+                public_key.verify(
+                    signature,
+                    file_data,
+                    padding.PSS(
+                        mgf=padding.MGF1(hashes.SHA256()),
+                        salt_length=padding.PSS.MAX_LENGTH
+                    ),
+                    hashes.SHA256()
+                )
+                is_valid = True
+                error_msg = None
+            except Exception as e:
+                is_valid = False
+                error_msg = f"签名验证失败: {str(e)}"
+            
+            # 转换为相对路径
+            relative_file_path = _convert_to_relative_path(str(resolved_path), str(uploads_dir))
+            relative_signature_path = _convert_to_relative_path(
+                str(signature_file),
+                str(project_root)
+            )
+            relative_public_key_path = _convert_to_relative_path(
+                str(public_key_file),
+                str(project_root)
+            )
+            
+            result_data = {
+                "action": "verify",
+                "file_path": relative_file_path,
+                "signature_file": relative_signature_path,
+                "public_key_file": relative_public_key_path,
+                "is_valid": is_valid,
+                "verification_message": "签名验证成功" if is_valid else error_msg,
+                "status": "completed"
+            }
+            
+            return ToolResult(
+                success=is_valid,
+                data=result_data,
+                error=error_msg if not is_valid else None,
+                execution_time=time.time() - start_time
+            )
+            
+        except Exception as e:
+            self.logger.error(f"验证签名时发生错误: {str(e)}", exc_info=True)
+            return ToolResult(
+                success=False,
+                error=f"验证签名时发生错误: {str(e)}",
+                execution_time=time.time() - start_time
+            )
+    
+    async def _get_or_generate_key_pair(self, signer_name: str):
+        """获取或生成密钥对"""
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.backends import default_backend
+        
+        private_key_file = self.keys_dir / f"{signer_name}_private_key.pem"
+        public_key_file = self.keys_dir / f"{signer_name}_public_key.pem"
+        
+        # 如果私钥文件存在，加载它
+        if private_key_file.exists():
+            with open(private_key_file, 'rb') as f:
+                private_key = serialization.load_pem_private_key(
+                    f.read(),
+                    password=None,
+                    backend=default_backend()
+                )
+            return private_key, None
+        
+        # 否则生成新的密钥对
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        # 保存私钥
+        with open(private_key_file, 'wb') as f:
+            f.write(private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
+        
+        # 保存公钥
+        public_key = private_key.public_key()
+        with open(public_key_file, 'wb') as f:
+            f.write(public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ))
+        
+        self.logger.info(f"已为新签名者 '{signer_name}' 生成密钥对")
+        
+        return private_key, public_key
+

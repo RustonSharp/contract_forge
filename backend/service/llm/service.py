@@ -144,6 +144,10 @@ class LLMChatService:
 - 用户说："分析这个合同" → 使用 n8n_workflow_trigger
 - 用户说："帮我审核一下合同" → 使用 n8n_workflow_trigger
 
+**例外情况**：如果用户明确提到以下关键词，不要使用 n8n_workflow_trigger，而应使用对应的专用工具：
+- "电子签名"、"签名"、"数字签名" → 使用 digital_signature（电子签名工具）
+- "转pdf"、"转换为pdf"、"转为pdf" → 使用 image_to_pdf（图片转PDF工具）
+
 【规则 2 - 明确指定任务时根据文件类型选择工具】
 如果用户明确要求执行特定任务，必须根据文件类型和任务类型选择正确的工具：
 
@@ -157,6 +161,12 @@ class LLMChatService:
 - 如果文件是图片格式（.jpg, .jpeg, .png, .bmp, .tiff, .tif）→ 使用 image_to_pdf（图片转PDF工具）
 - 用户说："把这个图片转为pdf"、"转pdf"、"转换为pdf" → 使用 image_to_pdf
 - **重要**：格式转换任务必须使用对应的转换工具，不要使用 n8n_workflow_trigger
+
+**电子签名任务（包括"电子签名"、"签名"、"数字签名"、"验证签名"等）**：
+- 用户说："使用电子签名工具"、"给文件签名"、"对文件进行数字签名" → 使用 digital_signature（电子签名工具）
+- 用户说："验证签名"、"验证文件签名" → 使用 digital_signature，参数 action="verify"
+- 用户说："签名文件"、"签署文件" → 使用 digital_signature，参数 action="sign"（默认）
+- **重要**：电子签名任务必须使用 digital_signature 工具，不要使用 n8n_workflow_trigger
 
 **其他明确任务**：
 - 用户说："进行风险评估" → 使用 risk_assessment（需要先有合同文本）
@@ -246,7 +256,33 @@ class LLMChatService:
 }}
 ```
 
-示例 4 - 其他明确任务：
+示例 4 - 电子签名任务：
+用户："使用电子签名工具" 或 "给 test_contract.pdf 签名" 或 "对文件进行数字签名"
+你的响应：
+```json
+{{
+    "tool_name": "digital_signature",
+    "parameters": {{
+        "action": "sign",
+        "file_path": "test_contract.pdf",
+        "signer_name": "默认签名者"
+    }}
+}}
+```
+
+用户："验证签名" 或 "验证 test_contract.pdf 的签名"
+你的响应：
+```json
+{{
+    "tool_name": "digital_signature",
+    "parameters": {{
+        "action": "verify",
+        "file_path": "test_contract.pdf"
+    }}
+}}
+```
+
+示例 5 - 其他明确任务：
 用户："进行风险评估"
 你的响应：
 ```json
@@ -258,7 +294,7 @@ class LLMChatService:
 }}
 ```
 
-示例 5 - 仅提问：
+示例 6 - 仅提问：
 用户："什么是合同？"
 你的响应：直接回答，不调用工具。
 
@@ -452,10 +488,11 @@ class LLMChatService:
                 # 检查是否包含通用处理关键词
                 is_generic_request = any(keyword in last_user_message for keyword in generic_processing_keywords)
                 
-                # 如果没有明确指定具体任务（如"风险评估"、"合规校验"、"解析"、"提取内容"、"转为pdf"等），则认为是通用请求
+                # 如果没有明确指定具体任务（如"风险评估"、"合规校验"、"解析"、"提取内容"、"转为pdf"、"电子签名"等），则认为是通用请求
                 specific_task_keywords = [
                     "风险评估", "合规校验", "合规检查", "解析", "提取文本", "提取内容", "OCR", "识别", "查询", "搜索",
-                    "转为pdf", "转pdf", "转换为pdf", "转换成pdf", "转为", "转换", "转格式"
+                    "转为pdf", "转pdf", "转换为pdf", "转换成pdf", "转为", "转换", "转格式",
+                    "电子签名", "数字签名", "签名", "签署", "验证签名", "签名工具"
                 ]
                 has_specific_task = any(keyword in last_user_message for keyword in specific_task_keywords)
                 

@@ -9,6 +9,7 @@ numpy<2.0.0
 sentence-transformers>=3.0.0
 langchain-core>=0.3.0
 langchain>=0.1.0  # PaddleOCR 可能需要完整的 langchain 包
+langchain-community>=0.2.0  # 与 langchain-core 1.x 兼容的版本
 langgraph>=0.2.0
 openai>=2.14.0
 
@@ -32,9 +33,6 @@ paddleocr>=3.0.3
 opencv-python>=4.6.0.66
 # 处理几何图形计算，Mac 下建议安装
 shapely
-# langchain 完整包（PaddleOCR 可能需要）
-# 如果遇到 langchain.docstore 错误，可能需要安装旧版本：pip install langchain==0.0.350
-langchain>=0.1.0
 
 # 实用工具
 pydantic>=2.0.0
@@ -45,3 +43,6 @@ aiohttp>=3.9.0
 # 测试工具（可选，用于运行测试）
 # pytest>=7.4.0
 # pytest-asyncio>=0.21.0
+
+# 电子签名工具
+cryptography>=41.0.0

@@ -13,6 +13,7 @@ from backend.service.tools.core_tools import (
     SigningSubjectComplianceTool,
     CoreClausesCompletenessTool,
     LegalConflictComplianceTool,
+    DigitalSignatureTool,
 )
 from backend.service.tools.n8n_tools import N8NWorkflowTriggerTool
 from backend.service.tools.base import ContractAnalysisTool
@@ -69,6 +70,10 @@ def initialize_default_tools():
     # 11. N8N 工作流触发工具
     n8n_trigger = N8NWorkflowTriggerTool()
     registry.register(n8n_trigger)
+    
+    # 12. 电子签名工具
+    digital_signature = DigitalSignatureTool()
+    registry.register(digital_signature)
     
     print(f"✓ 已注册 {registry.count()} 个工具:")
     for tool_name in registry.list_tool_names():
