@@ -8,6 +8,7 @@ chromadb==0.5.0
 numpy<2.0.0
 sentence-transformers>=3.0.0
 langchain-core>=0.3.0
+langchain>=0.1.0  # PaddleOCR 可能需要完整的 langchain 包
 langgraph>=0.2.0
 openai>=2.14.0
 
@@ -15,13 +16,32 @@ openai>=2.14.0
 pymupdf==1.24.11
 python-docx==1.1.2
 
-# OCR 支持（可选，根据需要安装）
-# pytesseract>=0.3.10  # Tesseract OCR Python 包装器
-# Pillow>=10.0.0  # 图像处理库（OCR 需要）
-# paddleocr>=2.7.0  # 百度 PaddleOCR（中文识别效果好）
+# --- 图像处理依赖 ---
+# Pillow 用于基础图片操作
+Pillow>=10.0.0
+
+# --- OCR 识别（使用 PaddleOCR）---
+# 核心深度学习引擎（针对 Mac 优化）
+# 使用 3.0 开发版对 M1/M2/M3 芯片兼容性更好，且包含最新的 PP-OCRv5 模型支持
+paddlepaddle>=3.0.0b1
+# PaddleOCR 工具库（安装完整版本，包含所有依赖）
+# 注意：可以使用 "paddleocr[all]" 安装所有可选依赖
+paddleocr>=3.0.3
+# 图像处理与数学计算依赖
+# OpenCV 用于图像读取和预处理
+opencv-python>=4.6.0.66
+# 处理几何图形计算，Mac 下建议安装
+shapely
+# langchain 完整包（PaddleOCR 可能需要）
+# 如果遇到 langchain.docstore 错误，可能需要安装旧版本：pip install langchain==0.0.350
+langchain>=0.1.0
 
 # 实用工具
 pydantic>=2.0.0
 python-dotenv>=1.0.0
 requests>=2.32.0
 aiohttp>=3.9.0
+
+# 测试工具（可选，用于运行测试）
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0

@@ -147,10 +147,11 @@ class LLMChatService:
 【规则 2 - 明确指定任务时根据文件类型选择工具】
 如果用户明确要求执行特定任务，必须根据文件类型和任务类型选择正确的工具：
 
-**解析任务**：
-- 如果文件是图片格式（.jpg, .jpeg, .png, .bmp）→ 使用 ocr_parser（OCR解析工具）
+**解析任务（包括"提取内容"、"解析"、"提取文本"、"识别"等）**：
+- 如果文件是图片格式（.jpg, .jpeg, .png, .bmp, .tiff, .tif）→ 使用 ocr_parser（OCR解析工具）
 - 如果文件是文档格式（.pdf, .docx, .doc）→ 使用 document_parser（文档解析工具）
-- 如果用户只说"解析"但没有指定文件，需要从上下文或对话中提取文件名
+- 如果用户只说"提取内容"、"解析"等但没有指定文件，需要从上下文或对话中提取文件名
+- **重要**：当用户说"提取内容"时，必须根据文件类型自动选择合适的解析工具
 
 **其他明确任务**：
 - 用户说："进行风险评估" → 使用 risk_assessment（需要先有合同文本）
@@ -174,7 +175,13 @@ class LLMChatService:
 }}
 ```
 
-【规则 4 - 仅提问时直接回答】
+【规则 4 - 工具执行后直接回答】
+当工具执行成功后，必须直接使用工具返回的结果回答用户的问题，**不要再调用工具**。
+- 如果工具返回了文本内容（如 OCR 或文档解析），直接使用这些内容回答用户
+- 如果工具执行失败，向用户说明错误情况，不要重复调用同一个工具
+- **重要**：工具执行一次即可，不要重复调用同一个工具
+
+【规则 5 - 仅提问时直接回答】
 如果用户只是询问问题（如"什么是合同？"），不需要调用工具，直接回答即可。
 
 ═══════════════════════════════════════════════════════════════
@@ -194,7 +201,7 @@ class LLMChatService:
 ```
 
 示例 2 - 解析图片文件（使用 OCR）：
-用户："解析这个合同图片" 或 "解析 test_contract.jpg"
+用户："解析这个合同图片" 或 "解析 test_contract.jpg" 或 "提取内容 test_contract.jpg"
 你的响应：
 ```json
 {{
@@ -206,7 +213,7 @@ class LLMChatService:
 ```
 
 示例 3 - 解析文档文件（使用文档解析）：
-用户："解析文档 test.pdf" 或 "解析这个PDF合同"
+用户："解析文档 test.pdf" 或 "解析这个PDF合同" 或 "提取内容 test.pdf"
 你的响应：
 ```json
 {{
@@ -216,6 +223,11 @@ class LLMChatService:
     }}
 }}
 ```
+
+示例 3.1 - 提取内容（根据文件类型自动选择工具）：
+用户："提取内容"（已指定文件）
+- 如果文件是图片（.jpg, .png等）→ 使用 ocr_parser
+- 如果文件是文档（.pdf, .docx等）→ 使用 document_parser
 
 示例 4 - 其他明确任务：
 用户："进行风险评估"
@@ -237,11 +249,14 @@ class LLMChatService:
 重要提示 - 文件类型识别
 ═══════════════════════════════════════════════════════════════
 
-当用户要求"解析"文件时，必须根据文件扩展名选择工具：
-- 图片文件（.jpg, .jpeg, .png, .bmp, .tiff, .tif）→ ocr_parser
-- 文档文件（.pdf, .docx, .doc）→ document_parser
+当用户要求"提取内容"、"解析"、"提取文本"、"识别"文件时，必须根据文件扩展名选择工具：
+- 图片文件（.jpg, .jpeg, .png, .bmp, .tiff, .tif）→ ocr_parser（OCR解析工具）
+- 文档文件（.pdf, .docx, .doc）→ document_parser（文档解析工具）
 
-如果用户没有提供文件名，尝试从对话历史中提取最近提到的文件名。
+**特别说明**：
+- "提取内容"等同于"解析"，必须根据文件类型自动选择合适的解析工具
+- 如果用户没有提供文件名，尝试从对话历史中提取最近提到的文件名
+- 如果已指定文件路径，优先使用指定的文件路径
 
 ═══════════════════════════════════════════════════════════════
 
@@ -420,8 +435,8 @@ class LLMChatService:
                 # 检查是否包含通用处理关键词
                 is_generic_request = any(keyword in last_user_message for keyword in generic_processing_keywords)
                 
-                # 如果没有明确指定具体任务（如"风险评估"、"合规校验"、"解析"等），则认为是通用请求
-                specific_task_keywords = ["风险评估", "合规校验", "合规检查", "解析", "提取文本", "OCR", "识别", "查询", "搜索"]
+                # 如果没有明确指定具体任务（如"风险评估"、"合规校验"、"解析"、"提取内容"等），则认为是通用请求
+                specific_task_keywords = ["风险评估", "合规校验", "合规检查", "解析", "提取文本", "提取内容", "OCR", "识别", "查询", "搜索"]
                 has_specific_task = any(keyword in last_user_message for keyword in specific_task_keywords)
                 
                 if is_generic_request and not has_specific_task:
@@ -506,8 +521,8 @@ class LLMChatService:
                     continue
         
         # 尝试从文本中提取工具名称和参数
-        # 特别处理"解析"任务 - 根据文件类型自动选择工具
-        if "解析" in text or "提取文本" in text or "识别" in text:
+        # 特别处理"解析"和"提取内容"任务 - 根据文件类型自动选择工具
+        if "解析" in text or "提取文本" in text or "提取内容" in text or "识别" in text:
             # 优先使用提供的 file_path，否则从文本或消息中提取
             file_path_to_use = file_path
             if file_path_to_use:
@@ -914,15 +929,51 @@ class LLMChatService:
             
             # 将工具结果添加到消息中，让 LLM 继续处理（非 n8n_workflow_trigger 工具）
             if tool_result["success"]:
-                result_text = f"工具 '{tool_name}' 执行成功。结果：\n{json.dumps(tool_result.get('data'), ensure_ascii=False, indent=2)}"
+                result_data = tool_result.get('data', {})
+                # 对于 OCR 和文档解析工具，提取文本内容以便 LLM 直接使用
+                if tool_name == "ocr_parser":
+                    recognized_text = result_data.get('recognized_text', '')
+                    result_text = f"工具 '{tool_name}' 执行成功。\n识别出的文本内容：\n{recognized_text}\n\n请直接使用上述文本内容回答用户的问题，不要再调用工具。"
+                elif tool_name == "document_parser":
+                    text_content = result_data.get('text_content', '')
+                    result_text = f"工具 '{tool_name}' 执行成功。\n提取的文档内容：\n{text_content}\n\n请直接使用上述文档内容回答用户的问题，不要再调用工具。"
+                else:
+                    result_text = f"工具 '{tool_name}' 执行成功。结果：\n{json.dumps(result_data, ensure_ascii=False, indent=2)}\n\n请根据工具执行结果，直接回答用户的问题，不要再调用工具。"
             else:
-                result_text = f"工具 '{tool_name}' 执行失败。错误：{tool_result.get('error', '未知错误')}"
+                result_text = f"工具 '{tool_name}' 执行失败。错误：{tool_result.get('error', '未知错误')}\n\n请向用户说明错误情况，不要再重复调用同一个工具。"
             
             # 添加工具调用和结果到消息中
             chat_messages.append(ChatMessage(
                 role="user",
-                content=f"工具执行结果：{result_text}\n\n请根据工具执行结果，继续回答用户的问题。"
+                content=f"工具执行结果：{result_text}"
             ))
+            
+            # 检查是否重复调用同一个工具（防止循环）
+            recent_tool_calls = [tc.get("tool_name") for tc in tool_calls[-3:]]  # 检查最近3次调用
+            if len(recent_tool_calls) >= 2 and recent_tool_calls[-1] == recent_tool_calls[-2] == tool_name:
+                # 如果同一个工具被连续调用2次，强制返回结果
+                logger.warning(f"检测到工具 '{tool_name}' 被重复调用，强制返回结果以避免循环")
+                if tool_result["success"]:
+                    if tool_name == "ocr_parser":
+                        recognized_text = tool_result.get('data', {}).get('recognized_text', '')
+                        final_message = f"已成功识别图片内容：\n\n{recognized_text}"
+                    elif tool_name == "document_parser":
+                        text_content = tool_result.get('data', {}).get('text_content', '')
+                        final_message = f"已成功提取文档内容：\n\n{text_content}"
+                    else:
+                        final_message = f"工具 '{tool_name}' 执行成功。结果：\n{json.dumps(tool_result.get('data'), ensure_ascii=False, indent=2)}"
+                else:
+                    final_message = f"工具 '{tool_name}' 执行失败：{tool_result.get('error', '未知错误')}"
+                
+                return {
+                    "message": final_message,
+                    "tool_calls": tool_calls if tool_calls else None,
+                    "usage": {
+                        "prompt_tokens": getattr(response, "prompt_tokens", None),
+                        "completion_tokens": getattr(response, "completion_tokens", None),
+                        "total_tokens": getattr(response, "total_tokens", None)
+                    }
+                }
         
         # 达到最大迭代次数，返回最后的消息
         # 如果最后的消息是 JSON 格式的工具调用（说明工具调用链未完成），生成友好消息

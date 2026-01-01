@@ -8,10 +8,12 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from abc import ABC, abstractmethod
 import json
 
 from backend.service.tools.base import BaseTool
 from backend.service.tools.models import ToolInfo, ToolParameter, ToolResult
+from backend.utils.logger import get_logger
 
 
 def _convert_to_relative_path(file_path: str, uploads_dir: str = "./uploads") -> str:
@@ -291,14 +293,282 @@ class DocumentParserTool(BaseTool):
             )
 
 
+# ==================== OCR 引擎抽象和实现 ====================
+
+class OCREngine(ABC):
+    """OCR 引擎抽象基类"""
+    
+    @abstractmethod
+    async def recognize(self, image_path: str, language: str = "zh") -> str:
+        """
+        识别图片中的文本
+        
+        Args:
+            image_path: 图片文件路径
+            language: 识别语言（zh: 中文, en: 英文）
+            
+        Returns:
+            str: 识别出的文本内容
+        """
+        pass
+
+
+class PaddleOCREngine(OCREngine):
+    """PaddleOCR 引擎实现"""
+    
+    _instance = None
+    _initialized = False
+    _init_failed = False
+    
+    @classmethod
+    def get_instance(cls):
+        """获取 PaddleOCR 实例（单例模式）"""
+        if cls._initialized and cls._instance is not None:
+            return cls._instance
+        
+        if cls._init_failed:
+            return None
+        
+        # 尝试从全局变量获取
+        try:
+            import backend.main as main_module
+            if hasattr(main_module, 'global_ocr_engine') and main_module.global_ocr_engine is not None:
+                cls._instance = main_module.global_ocr_engine
+                cls._initialized = True
+                return cls._instance
+        except:
+            pass
+        
+        # 创建新的 PaddleOCR 实例
+        try:
+            import os
+            os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
+            os.environ.setdefault('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', 'YES')
+            os.environ.setdefault('DISABLE_MODEL_SOURCE_CHECK', 'True')
+            
+            if cls._instance is not None:
+                cls._initialized = True
+                return cls._instance
+            
+            # 尝试修复 langchain.docstore 导入问题
+            try:
+                import langchain.docstore  # type: ignore
+            except ImportError:
+                try:
+                    import langchain
+                    import sys
+                    if 'langchain.docstore' not in sys.modules:
+                        from types import ModuleType
+                        docstore_module = ModuleType('langchain.docstore')
+                        sys.modules['langchain.docstore'] = docstore_module
+                except ImportError:
+                    pass
+            
+            from paddleocr import PaddleOCR
+            cls._instance = PaddleOCR(use_angle_cls=True, lang='ch')
+            cls._initialized = True
+            logger = get_logger(__name__)
+            logger.info("✓ PaddleOCR 引擎初始化成功")
+            return cls._instance
+        except ImportError as e:
+            cls._init_failed = True
+            logger = get_logger(__name__)
+            error_msg = str(e)
+            if 'langchain' in error_msg.lower():
+                logger.error(f"PaddleOCR 依赖问题: {error_msg}")
+            else:
+                logger.error(f"PaddleOCR 未安装: {error_msg}")
+            return None
+        except Exception as e:
+            error_msg = str(e)
+            if 'PDX has already been initialized' in error_msg:
+                if cls._instance is not None:
+                    cls._initialized = True
+                    return cls._instance
+                try:
+                    import backend.main as main_module
+                    if hasattr(main_module, 'global_ocr_engine') and main_module.global_ocr_engine is not None:
+                        cls._instance = main_module.global_ocr_engine
+                        cls._initialized = True
+                        return cls._instance
+                except:
+                    pass
+            cls._init_failed = True
+            logger = get_logger(__name__)
+            logger.error(f"初始化 PaddleOCR 失败: {error_msg}")
+            return None
+    
+    async def recognize(self, image_path: str, language: str = "zh") -> str:
+        """使用 PaddleOCR 识别图片"""
+        ocr_engine = self.get_instance()
+        if ocr_engine is None:
+            raise Exception("PaddleOCR 初始化失败")
+        
+        # 执行 OCR 识别
+        result = ocr_engine.ocr(str(image_path))
+        
+        # 提取文本内容
+        if result and len(result) > 0:
+            lines = []
+            for page_result in result:
+                if page_result:
+                    for line in page_result:
+                        if line and len(line) >= 2:
+                            text_info = line[1]
+                            if isinstance(text_info, (list, tuple)) and len(text_info) >= 1:
+                                text = text_info[0] if isinstance(text_info[0], str) else str(text_info[0])
+                            elif isinstance(text_info, str):
+                                text = text_info
+                            else:
+                                text = str(text_info)
+                            
+                            if text and text.strip():
+                                lines.append(text.strip())
+            return '\n'.join(lines)
+        return ""
+
+
+class LLMOCREngine(OCREngine):
+    """使用大语言模型进行 OCR 识别的引擎实现"""
+    
+    # OCR 专用模型名称（可通过环境变量 OCR_MODEL_NAME 配置）
+    OCR_MODEL_NAME = os.getenv("OCR_MODEL_NAME", "qwen3-omni-flash-2025-12-01")
+    
+    def __init__(self):
+        from backend.utils.llm import get_llm_client
+        self.llm_client = get_llm_client()
+    
+    async def recognize(self, image_path: str, language: str = "zh") -> str:
+        """使用 LLM 识别图片中的文本"""
+        import base64
+        from pathlib import Path
+        
+        # 读取图片并转换为 base64
+        image_path_obj = Path(image_path)
+        if not image_path_obj.exists():
+            raise FileNotFoundError(f"图片文件不存在: {image_path}")
+        
+        with open(image_path, 'rb') as f:
+            image_data = f.read()
+            image_base64 = base64.b64encode(image_data).decode('utf-8')
+        
+        # 确定图片格式
+        file_ext = image_path_obj.suffix.lower()
+        mime_type = "image/jpeg"
+        if file_ext in ['.png']:
+            mime_type = "image/png"
+        elif file_ext in ['.gif']:
+            mime_type = "image/gif"
+        elif file_ext in ['.webp']:
+            mime_type = "image/webp"
+        
+        # 构建提示词
+        lang_prompt = "中文" if language == "zh" else "英文"
+        prompt = f"""请识别这张图片中的所有文字内容，并按照原始格式（包括换行、段落等）输出。图片中的文字是{lang_prompt}。
+
+要求：
+1. 完整识别图片中的所有文字
+2. 保持原有的格式和排版
+3. 如果是合同或文档，请保持段落结构
+4. 只输出识别出的文字内容，不要添加任何解释或说明
+
+请开始识别："""
+        
+        try:
+            # 尝试使用支持视觉的模型（如 GPT-4 Vision、通义千问 VL）
+            # 对于 OpenAI 兼容 API，需要直接调用底层客户端发送图片
+            if hasattr(self.llm_client, 'provider') and hasattr(self.llm_client.provider, 'client'):
+                try:
+                    from openai import AsyncOpenAI
+                    if isinstance(self.llm_client.provider.client, AsyncOpenAI):
+                        # 构建包含图片的消息（OpenAI Vision API 格式）
+                        vision_messages = [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:{mime_type};base64,{image_base64}"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                        
+                        # 直接调用底层 API，使用 OCR 专用模型
+                        ocr_model_name = self.OCR_MODEL_NAME
+                        response = await self.llm_client.provider.client.chat.completions.create(
+                            model=ocr_model_name,
+                            messages=vision_messages,
+                            temperature=0.1,
+                            max_tokens=4000
+                        )
+                        
+                        content = response.choices[0].message.content
+                        if content:
+                            return content.strip()
+                except Exception as e:
+                    # 如果底层 API 调用失败，检查是否是图片相关错误
+                    error_msg = str(e)
+                    if "vision" in error_msg.lower() or "image" in error_msg.lower() or "unsupported" in error_msg.lower():
+                        raise Exception(f"当前 LLM 模型不支持图片识别。请使用支持视觉的模型（如 GPT-4 Vision 或通义千问 VL），或切换到 PaddleOCR 引擎。错误: {error_msg}")
+                    # 如果不是图片相关错误，继续尝试其他方式
+                    pass
+            
+            # 如果上面的方式失败，尝试使用普通文本方式（可能不支持图片）
+            # 这种情况下会失败并提示用户切换引擎
+            from backend.utils.llm.providers import ChatMessage
+            messages = [
+                ChatMessage(role="user", content=prompt),
+            ]
+            response = await self.llm_client.chat(messages, temperature=0.1)
+            return response.content.strip()
+            
+        except Exception as e:
+            # 如果 LLM 不支持图片或调用失败，抛出错误
+            error_msg = str(e)
+            if "vision" in error_msg.lower() or "image" in error_msg.lower() or "unsupported" in error_msg.lower():
+                raise Exception(f"当前 LLM 模型不支持图片识别。请使用支持视觉的模型（如 GPT-4 Vision 或通义千问 VL），或切换到 PaddleOCR 引擎。错误: {error_msg}")
+            raise Exception(f"LLM OCR 识别失败: {error_msg}")
+
+
+def get_ocr_engine() -> OCREngine:
+    """
+    获取配置的 OCR 引擎
+    
+    通过环境变量 OCR_ENGINE 配置：
+    - "llm": 使用大语言模型（默认）
+    - "paddle": 使用 PaddleOCR
+    
+    Returns:
+        OCREngine: OCR 引擎实例
+    """
+    engine_type = os.getenv("OCR_ENGINE", "llm").lower()
+    
+    if engine_type == "paddle":
+        return PaddleOCREngine()
+    else:  # 默认使用 LLM
+        return LLMOCREngine()
+
+
 class OCRParserTool(BaseTool):
-    """OCR 解析工具 - 支持图片类合同识别"""
+    """OCR 解析工具 - 支持可配置的 OCR 引擎（默认使用 LLM）"""
+    
+    # 类变量：存储当前使用的 OCR 引擎
+    _ocr_engine: Optional[OCREngine] = None
+    _engine_type: Optional[str] = None
     
     def get_info(self) -> ToolInfo:
+        # 获取当前使用的引擎类型
+        engine_type = os.getenv("OCR_ENGINE", "llm").lower()
+        engine_name = "大语言模型" if engine_type == "llm" else "PaddleOCR"
+        
         return ToolInfo(
             name="ocr_parser",
             display_name="OCR 解析工具",
-            description="识别图片类合同，提取文本内容（支持常见图片格式）",
+            description=f"识别图片类合同，提取文本内容（支持常见图片格式）。当前使用引擎: {engine_name}。可通过环境变量 OCR_ENGINE 配置（llm/paddle）。",
             parameters=[
                 ToolParameter(
                     name="image_path",
@@ -311,7 +581,7 @@ class OCRParserTool(BaseTool):
                     type="string",
                     description="识别语言（zh: 中文, en: 英文, zh+en: 中英文）",
                     required=False,
-                    default="zh+en"
+                    default="zh"  # 默认使用中文
                 )
             ],
             category="document",
@@ -333,7 +603,7 @@ class OCRParserTool(BaseTool):
                 )
             
             image_path = kwargs.get("image_path")
-            language = kwargs.get("language", "zh+en")
+            language = kwargs.get("language", "zh")  # 默认使用中文
             
             # 保存原始输入路径
             original_image_path = image_path
@@ -378,46 +648,67 @@ class OCRParserTool(BaseTool):
                     execution_time=time.time() - start_time
                 )
             
-            # 尝试使用 PaddleOCR（如果可用）
+            # 使用配置的 OCR 引擎进行识别
             ocr_text = ""
             try:
-                from paddleocr import PaddleOCR  # type: ignore
-                ocr = PaddleOCR(use_angle_cls=True, lang='ch')
-                result = ocr.ocr(absolute_image_path, cls=True)
+                # 获取当前配置的 OCR 引擎类型
+                current_engine_type = os.getenv("OCR_ENGINE", "llm").lower()
                 
-                # 解析 OCR 结果
-                texts = []
-                for line in result[0] if result else []:
-                    if line and len(line) >= 2:
-                        text = line[1][0] if isinstance(line[1], (list, tuple)) else line[1]
-                        texts.append(text)
-                        ocr_text += text + "\n"
+                # 如果引擎类型改变，重新获取引擎实例
+                if OCRParserTool._engine_type != current_engine_type:
+                    OCRParserTool._ocr_engine = get_ocr_engine()
+                    OCRParserTool._engine_type = current_engine_type
+                    logger = get_logger(__name__)
+                    logger.info(f"使用 OCR 引擎: {current_engine_type.upper()}")
                 
-            except ImportError:
-                # 如果没有安装 PaddleOCR，使用简单的模拟实现
-                # 实际项目中应该安装: pip install paddleocr
-                ocr_text = f"[模拟 OCR 结果] 从图片 {relative_image_path} 识别出的文本内容。\n" \
-                          f"提示: 安装 PaddleOCR 以获得真实的 OCR 功能: pip install paddleocr"
-            except Exception as e:
+                # 如果还没有初始化，获取引擎实例
+                if OCRParserTool._ocr_engine is None:
+                    OCRParserTool._ocr_engine = get_ocr_engine()
+                    OCRParserTool._engine_type = current_engine_type
+                
+                # 使用引擎识别图片
+                ocr_text = await OCRParserTool._ocr_engine.recognize(
+                    str(absolute_image_path),
+                    language=language
+                )
+                
+                if not ocr_text or not ocr_text.strip():
+                    return ToolResult(
+                        success=False,
+                        error="OCR 识别成功但未提取到文本内容。请检查图片是否包含文字。",
+                        execution_time=time.time() - start_time
+                    )
+                
+                # 构建返回结果
+                result_data = {
+                    "image_path": relative_image_path,
+                    "language": language,
+                    "recognized_text": ocr_text.strip(),
+                    "text_length": len(ocr_text),
+                    "engine": OCRParserTool._engine_type or "llm",
+                    "status": "completed"
+                }
+                
                 return ToolResult(
-                    success=False,
-                    error=f"OCR 识别失败: {str(e)}",
+                    success=True,
+                    data=result_data,
                     execution_time=time.time() - start_time
                 )
-            
-            result_data = {
-                "image_path": relative_image_path,  # 使用相对路径
-                "language": language,
-                "recognized_text": ocr_text.strip(),
-                "text_length": len(ocr_text),
-                "status": "completed"
-            }
-            
-            return ToolResult(
-                success=True,
-                data=result_data,
-                execution_time=time.time() - start_time
-            )
+                    
+            except Exception as e:
+                error_msg = str(e)
+                # 如果是 LLM OCR 失败且提示不支持图片，提供更友好的错误信息
+                if "不支持图片" in error_msg or "vision" in error_msg.lower():
+                    return ToolResult(
+                        success=False,
+                        error=f"{error_msg}\n提示：可以通过设置环境变量 OCR_ENGINE=paddle 切换到 PaddleOCR 引擎。",
+                        execution_time=time.time() - start_time
+                    )
+                return ToolResult(
+                    success=False,
+                    error=f"OCR 识别失败: {error_msg}",
+                    execution_time=time.time() - start_time
+                )
             
         except Exception as e:
             return ToolResult(
