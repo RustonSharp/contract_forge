@@ -1,5 +1,13 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { X, CheckCircle2, Circle, Loader2, AlertCircle } from "lucide-react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import {
+  X,
+  CheckCircle2,
+  Circle,
+  Loader2,
+  AlertCircle,
+  Download,
+} from "lucide-react";
+import { toPng } from "html-to-image";
 import { contractApi } from "../api/client";
 import type {
   WorkflowDefinitionResponse,
@@ -24,6 +32,8 @@ const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   // 获取工作流定义
   const fetchDefinition = useCallback(async () => {
@@ -371,6 +381,77 @@ const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
     }
   }, [nodeTree]);
 
+  // 导出工作流为图片
+  const handleExportAsImage = async () => {
+    if (!contentRef.current) {
+      console.error("无法找到要导出的内容区域");
+      setError("无法找到要导出的内容区域");
+      return;
+    }
+
+    setExporting(true);
+    setError(null);
+
+    const originalElement = contentRef.current;
+    const originalOverflow = originalElement.style.overflow;
+    const originalHeight = originalElement.style.height;
+    const originalMaxHeight = originalElement.style.maxHeight;
+
+    try {
+      // 临时修改样式以移除滚动限制，导出完整内容
+      originalElement.style.overflow = "visible";
+      originalElement.style.height = "auto";
+      originalElement.style.maxHeight = "none";
+
+      // 等待样式应用
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // 滚动到顶部
+      originalElement.scrollTop = 0;
+
+      // 使用 html-to-image 库导出为 PNG
+      const imageUrl = await toPng(originalElement, {
+        backgroundColor: "#ffffff",
+        pixelRatio: 2, // 提高图片清晰度
+        quality: 1.0,
+        cacheBust: true,
+      });
+
+      if (!imageUrl || imageUrl === "data:,") {
+        throw new Error("无法生成图片数据");
+      }
+
+      // 创建下载链接
+      const link = document.createElement("a");
+      const fileName = definition?.name
+        ? `${definition.name}_${new Date().toISOString().split("T")[0]}.png`
+        : `workflow_${new Date().toISOString().split("T")[0]}.png`;
+
+      link.download = fileName;
+      link.href = imageUrl;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+
+      // 清理
+      setTimeout(() => {
+        document.body.removeChild(link);
+      }, 100);
+    } catch (error: any) {
+      console.error("导出图片失败:", error);
+      const errorMessage = error?.message || "导出图片失败";
+      setError(
+        `导出图片失败: ${errorMessage}。请确保 html-to-image 库已正确安装。`
+      );
+    } finally {
+      // 恢复原始样式
+      originalElement.style.overflow = originalOverflow;
+      originalElement.style.height = originalHeight;
+      originalElement.style.maxHeight = originalMaxHeight;
+      setExporting(false);
+    }
+  };
+
   // 渲染节点树
   const renderNode = (
     treeNode: TreeNode,
@@ -600,16 +681,27 @@ const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
               </p>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportAsImage}
+              disabled={exporting || loading || !nodeTree}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="导出工作流为图片"
+            >
+              <Download className="w-4 h-4" />
+              {exporting ? "导出中..." : "导出图片"}
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
         </div>
 
         {/* 内容区域 */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-6" ref={contentRef}>
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
