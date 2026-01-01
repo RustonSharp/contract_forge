@@ -153,6 +153,11 @@ class LLMChatService:
 - 如果用户只说"提取内容"、"解析"等但没有指定文件，需要从上下文或对话中提取文件名
 - **重要**：当用户说"提取内容"时，必须根据文件类型自动选择合适的解析工具
 
+**格式转换任务（包括"转为pdf"、"转pdf"、"转换为pdf"、"转换成pdf"等）**：
+- 如果文件是图片格式（.jpg, .jpeg, .png, .bmp, .tiff, .tif）→ 使用 image_to_pdf（图片转PDF工具）
+- 用户说："把这个图片转为pdf"、"转pdf"、"转换为pdf" → 使用 image_to_pdf
+- **重要**：格式转换任务必须使用对应的转换工具，不要使用 n8n_workflow_trigger
+
 **其他明确任务**：
 - 用户说："进行风险评估" → 使用 risk_assessment（需要先有合同文本）
 - 用户说："查询法规" → 使用 regulation_search
@@ -228,6 +233,18 @@ class LLMChatService:
 用户："提取内容"（已指定文件）
 - 如果文件是图片（.jpg, .png等）→ 使用 ocr_parser
 - 如果文件是文档（.pdf, .docx等）→ 使用 document_parser
+
+示例 3.2 - 图片转PDF：
+用户："把这个图片转为pdf" 或 "转pdf test_contract.jpg" 或 "转换为pdf"
+你的响应：
+```json
+{{
+    "tool_name": "image_to_pdf",
+    "parameters": {{
+        "image_path": "test_contract.jpg"
+    }}
+}}
+```
 
 示例 4 - 其他明确任务：
 用户："进行风险评估"
@@ -435,8 +452,11 @@ class LLMChatService:
                 # 检查是否包含通用处理关键词
                 is_generic_request = any(keyword in last_user_message for keyword in generic_processing_keywords)
                 
-                # 如果没有明确指定具体任务（如"风险评估"、"合规校验"、"解析"、"提取内容"等），则认为是通用请求
-                specific_task_keywords = ["风险评估", "合规校验", "合规检查", "解析", "提取文本", "提取内容", "OCR", "识别", "查询", "搜索"]
+                # 如果没有明确指定具体任务（如"风险评估"、"合规校验"、"解析"、"提取内容"、"转为pdf"等），则认为是通用请求
+                specific_task_keywords = [
+                    "风险评估", "合规校验", "合规检查", "解析", "提取文本", "提取内容", "OCR", "识别", "查询", "搜索",
+                    "转为pdf", "转pdf", "转换为pdf", "转换成pdf", "转为", "转换", "转格式"
+                ]
                 has_specific_task = any(keyword in last_user_message for keyword in specific_task_keywords)
                 
                 if is_generic_request and not has_specific_task:
@@ -487,6 +507,8 @@ class LLMChatService:
                                     params["file_path"] = file_path_to_use
                                 elif tool_name == "ocr_parser":
                                     params["image_path"] = file_path_to_use
+                                elif tool_name == "image_to_pdf":
+                                    params["image_path"] = file_path_to_use
                                 elif tool_name == "n8n_workflow_trigger":
                                     # n8n_workflow_trigger 使用 file_path 参数（相对路径）
                                     relative_path = _convert_to_relative_path(file_path_to_use)
@@ -511,6 +533,8 @@ class LLMChatService:
                                         params["file_path"] = file_name
                                     elif tool_name == "ocr_parser":
                                         params["image_path"] = file_name
+                                    elif tool_name == "image_to_pdf":
+                                        params["image_path"] = file_name
                                     elif tool_name == "n8n_workflow_trigger":
                                         # 向后兼容：如果只是文件名，尝试转换为相对路径
                                         relative_path = _convert_to_relative_path(file_name)
@@ -521,6 +545,36 @@ class LLMChatService:
                     continue
         
         # 尝试从文本中提取工具名称和参数
+        # 特别处理"转为pdf"、"转pdf"等格式转换任务
+        if "转为pdf" in text or "转pdf" in text or "转换为pdf" in text or "转换成pdf" in text or ("转为" in text and "pdf" in text) or ("转换" in text and "pdf" in text):
+            # 优先使用提供的 file_path，否则从文本或消息中提取
+            file_path_to_use = file_path
+            if not file_path_to_use:
+                # 提取文件名
+                file_name = None
+                file_match = re.search(r'([^\s，,。\n]+\.(?:jpg|jpeg|png|bmp|tiff?))', text, re.IGNORECASE)
+                if file_match:
+                    file_name = file_match.group(1).strip()
+                elif messages:
+                    file_name = self._extract_file_name_from_messages(messages)
+                
+                if file_name:
+                    file_type = self._get_file_type(file_name)
+                    if file_type == "image":
+                        return {
+                            "tool_name": "image_to_pdf",
+                            "parameters": {"image_path": file_name}
+                        }
+            else:
+                # 从 file_path 中提取文件名用于判断类型
+                file_name_from_path = file_path_to_use.split('/')[-1]
+                file_type = self._get_file_type(file_name_from_path)
+                if file_type == "image":
+                    return {
+                        "tool_name": "image_to_pdf",
+                        "parameters": {"image_path": file_path_to_use}
+                    }
+        
         # 特别处理"解析"和"提取内容"任务 - 根据文件类型自动选择工具
         if "解析" in text or "提取文本" in text or "提取内容" in text or "识别" in text:
             # 优先使用提供的 file_path，否则从文本或消息中提取
@@ -574,6 +628,8 @@ class LLMChatService:
                     # 根据文件类型和工具类型设置参数
                     if tool_name == "ocr_parser":
                         params["image_path"] = file_path
+                    elif tool_name == "image_to_pdf":
+                        params["image_path"] = file_path
                     elif tool_name == "document_parser":
                         # 如果文件是图片但用户要求文档解析，应该用OCR
                         if file_type == "image":
@@ -598,6 +654,8 @@ class LLMChatService:
                                 # 根据文件类型和工具类型设置参数
                                 if tool_name == "ocr_parser":
                                     params["image_path"] = file_name
+                                elif tool_name == "image_to_pdf":
+                                    params["image_path"] = file_name
                                 elif tool_name == "document_parser":
                                     # 如果文件是图片但用户要求文档解析，应该用OCR
                                     if file_type == "image":
@@ -615,6 +673,8 @@ class LLMChatService:
                         file_type = self._get_file_type(file_name)
                         # 根据文件类型和工具类型设置参数
                         if tool_name == "ocr_parser":
+                            params["image_path"] = file_name
+                        elif tool_name == "image_to_pdf":
                             params["image_path"] = file_name
                         elif tool_name == "document_parser":
                             # 如果文件是图片但用户要求文档解析，应该用OCR

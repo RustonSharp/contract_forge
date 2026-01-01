@@ -6,6 +6,7 @@ from backend.service.tools.registry import get_registry
 from backend.service.tools.core_tools import (
     DocumentParserTool,
     OCRParserTool,
+    ImageToPdfTool,
     RegulationSearchTool,
     RiskAssessmentTool,
     EnterpriseInfoQueryTool,
@@ -32,36 +33,40 @@ def initialize_default_tools():
     ocr_parser = OCRParserTool()
     registry.register(ocr_parser)
     
-    # 3. 法规检索工具
+    # 3. 图片转 PDF 工具
+    image_to_pdf = ImageToPdfTool()
+    registry.register(image_to_pdf)
+    
+    # 4. 法规检索工具
     regulation_search = RegulationSearchTool()
     registry.register(regulation_search)
     
-    # 4. 风险评估工具
+    # 5. 风险评估工具
     risk_assessment = RiskAssessmentTool()
     registry.register(risk_assessment)
     
-    # 5. 合同分析工具（可选）
+    # 6. 合同分析工具（可选）
     contract_analysis = ContractAnalysisTool()
     registry.register(contract_analysis)
     
     # 注册合规工具
-    # 6. 企业信息查询工具
+    # 7. 企业信息查询工具
     enterprise_query = EnterpriseInfoQueryTool()
     registry.register(enterprise_query)
     
-    # 7. 签署主体合规校验工具
+    # 8. 签署主体合规校验工具
     signing_subject = SigningSubjectComplianceTool()
     registry.register(signing_subject)
     
-    # 8. 核心条款完整性校验工具
+    # 9. 核心条款完整性校验工具
     core_clauses = CoreClausesCompletenessTool()
     registry.register(core_clauses)
     
-    # 9. 法规冲突校验工具
+    # 10. 法规冲突校验工具
     legal_conflict = LegalConflictComplianceTool()
     registry.register(legal_conflict)
     
-    # 10. N8N 工作流触发工具
+    # 11. N8N 工作流触发工具
     n8n_trigger = N8NWorkflowTriggerTool()
     registry.register(n8n_trigger)
     

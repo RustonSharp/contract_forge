@@ -1774,3 +1774,165 @@ class LegalConflictComplianceTool(BaseTool):
         
         return None
 
+
+class ImageToPdfTool(BaseTool):
+    """图片转 PDF 工具 - 将图片格式文件转换为 PDF 格式"""
+    
+    def get_info(self) -> ToolInfo:
+        return ToolInfo(
+            name="image_to_pdf",
+            display_name="图片转 PDF 工具",
+            description="将图片格式文件（jpg, jpeg, png, bmp 等）转换为 PDF 格式，保存到与原图片相同的位置",
+            parameters=[
+                ToolParameter(
+                    name="image_path",
+                    type="string",
+                    description="图片文件路径（支持 .jpg, .jpeg, .png, .bmp, .tiff, .tif 等格式）",
+                    required=True
+                )
+            ],
+            category="document",
+            version="1.0.0"
+        )
+    
+    def _generate_unique_filename(self, file_path: Path) -> str:
+        """
+        生成唯一的文件名（如果文件已存在，添加 UUID 前缀）
+        
+        Args:
+            file_path: 目标文件路径
+            
+        Returns:
+            str: 唯一文件名
+        """
+        if not file_path.exists():
+            return file_path.name
+        
+        # 如果文件已存在，添加 UUID 前缀
+        import uuid
+        file_stem = file_path.stem
+        file_ext = file_path.suffix
+        unique_id = str(uuid.uuid4()).replace("-", "")[:8]
+        new_filename = f"{unique_id}_{file_stem}{file_ext}"
+        
+        return new_filename
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        """执行图片转 PDF 转换"""
+        start_time = time.time()
+        
+        try:
+            is_valid, error_msg = self.validate_parameters(**kwargs)
+            if not is_valid:
+                return ToolResult(
+                    success=False,
+                    error=error_msg,
+                    execution_time=time.time() - start_time
+                )
+            
+            image_path = kwargs.get("image_path")
+            
+            # 查找图片文件
+            resolved_path = find_file_in_uploads(image_path)
+            if not resolved_path:
+                project_root = Path(__file__).resolve().parent.parent.parent.parent
+                uploads_dir = project_root / "uploads"
+                resolved_path = find_file_in_uploads(image_path, str(uploads_dir))
+            
+            if not resolved_path:
+                return ToolResult(
+                    success=False,
+                    error=f"图片文件不存在: {image_path}。已尝试在 uploads 目录下查找，未找到匹配的文件。",
+                    execution_time=time.time() - start_time
+                )
+            
+            absolute_image_path = Path(resolved_path)
+            
+            # 检查文件格式
+            file_ext = absolute_image_path.suffix.lower()
+            supported_formats = [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"]
+            if file_ext not in supported_formats:
+                return ToolResult(
+                    success=False,
+                    error=f"不支持的图片格式: {file_ext}。支持格式: {', '.join(supported_formats)}",
+                    execution_time=time.time() - start_time
+                )
+            
+            # 检查是否已经是 PDF 格式
+            if file_ext == ".pdf":
+                return ToolResult(
+                    success=False,
+                    error="文件已经是 PDF 格式，无需转换",
+                    execution_time=time.time() - start_time
+                )
+            
+            # 生成 PDF 文件路径（与原图片相同位置，相同文件名，后缀改为 .pdf）
+            pdf_path = absolute_image_path.parent / f"{absolute_image_path.stem}.pdf"
+            
+            # 处理重名文件
+            unique_pdf_name = self._generate_unique_filename(pdf_path)
+            pdf_path = pdf_path.parent / unique_pdf_name
+            
+            # 使用 Pillow 将图片转换为 PDF
+            try:
+                from PIL import Image
+                
+                # 打开图片
+                img = Image.open(absolute_image_path)
+                
+                # 如果是 RGBA 模式，转换为 RGB（PDF 不支持透明度）
+                if img.mode == 'RGBA':
+                    # 创建白色背景
+                    rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                    rgb_img.paste(img, mask=img.split()[3])  # 使用 alpha 通道作为 mask
+                    img = rgb_img
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                # 保存为 PDF
+                img.save(pdf_path, 'PDF', resolution=100.0, quality=95)
+                
+                logger = get_logger(__name__)
+                logger.info(f"图片转 PDF 成功: {absolute_image_path} -> {pdf_path}")
+                
+            except ImportError:
+                return ToolResult(
+                    success=False,
+                    error="Pillow 未安装。请运行: pip install Pillow",
+                    execution_time=time.time() - start_time
+                )
+            except Exception as e:
+                return ToolResult(
+                    success=False,
+                    error=f"图片转 PDF 失败: {str(e)}",
+                    execution_time=time.time() - start_time
+                )
+            
+            # 转换为相对路径（相对于 uploads 目录）
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            uploads_dir = project_root / "uploads"
+            relative_pdf_path = _convert_to_relative_path(str(pdf_path), str(uploads_dir))
+            relative_image_path = _convert_to_relative_path(str(absolute_image_path), str(uploads_dir))
+            
+            # 构建返回结果
+            result_data = {
+                "image_path": relative_image_path,
+                "pdf_path": relative_pdf_path,
+                "pdf_filename": pdf_path.name,
+                "pdf_size": pdf_path.stat().st_size,
+                "status": "completed"
+            }
+            
+            return ToolResult(
+                success=True,
+                data=result_data,
+                execution_time=time.time() - start_time
+            )
+            
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"执行图片转 PDF 时发生错误: {str(e)}",
+                execution_time=time.time() - start_time
+            )
+

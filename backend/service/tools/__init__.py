@@ -9,6 +9,7 @@ from backend.service.tools.base import BaseTool
 from backend.service.tools.core_tools import (
     DocumentParserTool,
     OCRParserTool,
+    ImageToPdfTool,
     RegulationSearchTool,
     RiskAssessmentTool,
     EnterpriseInfoQueryTool,
@@ -28,6 +29,7 @@ __all__ = [
     "ToolParameter",
     "DocumentParserTool",
     "OCRParserTool",
+    "ImageToPdfTool",
     "RegulationSearchTool",
     "RiskAssessmentTool",
     "EnterpriseInfoQueryTool",
