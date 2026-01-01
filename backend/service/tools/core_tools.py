@@ -15,6 +15,8 @@ from backend.service.tools.base import BaseTool
 from backend.service.tools.models import ToolInfo, ToolParameter, ToolResult
 from backend.utils.logger import get_logger
 
+logger = get_logger(__name__)
+
 
 def _convert_to_relative_path(file_path: str, uploads_dir: str = "./uploads") -> str:
     """
@@ -150,6 +152,7 @@ class DocumentParserTool(BaseTool):
             # 验证参数
             is_valid, error_msg = self.validate_parameters(**kwargs)
             if not is_valid:
+                logger.warning(f"文档解析参数验证失败: {error_msg}")
                 return ToolResult(
                     success=False,
                     error=error_msg,
@@ -158,6 +161,7 @@ class DocumentParserTool(BaseTool):
             
             file_path = kwargs.get("file_path")
             extract_structure = kwargs.get("extract_structure", True)
+            logger.info(f"开始解析文档: {file_path}, 提取结构: {extract_structure}")
             
             # 获取项目根目录的 uploads 目录路径（用于后续相对路径转换）
             project_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -170,6 +174,7 @@ class DocumentParserTool(BaseTool):
                 resolved_path = find_file_in_uploads(file_path, str(uploads_dir))
             
             if not resolved_path:
+                logger.error(f"文件未找到: {file_path}")
                 return ToolResult(
                     success=False,
                     error=f"文件不存在: {file_path}。已尝试在 uploads 目录下查找，未找到匹配的文件。",
@@ -279,13 +284,17 @@ class DocumentParserTool(BaseTool):
                 "status": "completed"
             }
             
+            execution_time = time.time() - start_time
+            logger.info(f"文档解析成功: {file_path}, 文本长度: {len(text_content)}, 耗时: {execution_time:.3f}秒")
+            
             return ToolResult(
                 success=True,
                 data=result_data,
-                execution_time=time.time() - start_time
+                execution_time=execution_time
             )
             
         except Exception as e:
+            logger.error(f"执行文档解析时发生错误: {str(e)}", exc_info=True)
             return ToolResult(
                 success=False,
                 error=f"执行文档解析时发生错误: {str(e)}",
