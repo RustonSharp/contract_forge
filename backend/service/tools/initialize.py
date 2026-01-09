@@ -87,9 +87,9 @@ def initialize_default_tools():
     logger.debug("已注册 N8N 工作流触发工具")
     
     # 12. 电子签名工具
-    digital_signature = DigitalSignatureTool()
-    registry.register(digital_signature)
-    logger.debug("已注册电子签名工具")
+    # digital_signature = DigitalSignatureTool()
+    # registry.register(digital_signature)
+    # logger.debug("已注册电子签名工具")
     
     tool_count = registry.count()
     logger.info(f"✓ 已注册 {tool_count} 个工具:")
